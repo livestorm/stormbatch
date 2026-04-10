@@ -13,6 +13,7 @@ from app.services.row_metadata import build_row_results
 
 router = APIRouter(tags=["registration"])
 BULK_JOB_TASK_LIMIT = 50
+LIVESTORM_REQUEST_DELAY_SECONDS = 1.25
 
 
 def iter_chunks(items: list[dict], size: int) -> list[tuple[int, list[dict]]]:
@@ -62,7 +63,7 @@ async def register_people(
                         }
                     )
                     if created_job_count < total_job_count:
-                        await asyncio.sleep(0.9)
+                        await asyncio.sleep(LIVESTORM_REQUEST_DELAY_SECONDS)
 
         return RegisterResponse(
             jobs=jobs,

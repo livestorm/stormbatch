@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import ApiKeyInput from "./components/ApiKeyInput.vue";
 import FileUpload from "./components/FileUpload.vue";
 import JobResults from "./components/JobResults.vue";
@@ -26,6 +26,9 @@ const hasSubmittedJobs = ref(false);
 const retryingSessions = ref({});
 const totalSessionCount = ref(0);
 const createdSessionCount = ref(0);
+const isPollingTick = ref(false);
+const displayedProgressPercent = ref(0);
+const progressAnimator = ref(null);
 
 const parsedSessionIds = computed(() =>
   sessionIds.value
@@ -77,19 +80,18 @@ const expectedJobCount = computed(() => {
   return parsedSessionIds.value.length * chunksPerSession;
 });
 
-const progressPercent = computed(() => {
-  if (isSubmitting.value) {
-    if (!totalSessionCount.value) {
-      return 0;
-    }
-    return Math.round((createdSessionCount.value / totalSessionCount.value) * 100);
-  }
+const targetProgressPercent = computed(() => {
   const total = totalSessionCount.value || jobs.value.length;
   if (!total) {
     return 0;
   }
-  return Math.round((finishedJobs.value / total) * 100);
+  if (isSubmitting.value) {
+    return Math.min(50, Math.round((createdSessionCount.value / total) * 50));
+  }
+  return Math.round(50 + ((finishedJobs.value / total) * 50));
 });
+
+const progressPercent = computed(() => displayedProgressPercent.value);
 
 const isPollingJobs = computed(() =>
   jobs.value.some(
@@ -151,7 +153,9 @@ function onFileSelected(file) {
   rowResults.value = [];
   hasSubmittedJobs.value = false;
   duplicateEmails.value = [];
+  displayedProgressPercent.value = 0;
   stopPolling();
+  stopProgressAnimator();
   resetMessages();
 }
 
@@ -167,11 +171,14 @@ function startNewBatch() {
   retryingSessions.value = {};
   totalSessionCount.value = 0;
   createdSessionCount.value = 0;
+  isPollingTick.value = false;
+  displayedProgressPercent.value = 0;
   isSubmitting.value = false;
   isPreviewLoading.value = false;
   totalSessionCount.value = 0;
   createdSessionCount.value = 0;
   stopPolling();
+  stopProgressAnimator();
   resetMessages();
 }
 
@@ -238,7 +245,38 @@ function stopPolling() {
     clearInterval(poller.value);
     poller.value = null;
   }
+  isPollingTick.value = false;
 }
+
+function stopProgressAnimator() {
+  if (progressAnimator.value) {
+    clearInterval(progressAnimator.value);
+    progressAnimator.value = null;
+  }
+}
+
+function startProgressAnimator() {
+  stopProgressAnimator();
+  progressAnimator.value = setInterval(() => {
+    const target = targetProgressPercent.value;
+    const activeCap = isSubmitting.value ? 49 : 95;
+    const cap = isSubmitting.value || isPollingJobs.value ? Math.max(target, activeCap) : target;
+
+    if (displayedProgressPercent.value < cap) {
+      displayedProgressPercent.value = Math.min(cap, displayedProgressPercent.value + 1);
+    }
+  }, 700);
+}
+
+watch(targetProgressPercent, (target) => {
+  if (target > displayedProgressPercent.value) {
+    displayedProgressPercent.value = target;
+  }
+  if (!isSubmitting.value && !isPollingJobs.value) {
+    displayedProgressPercent.value = target;
+    stopProgressAnimator();
+  }
+});
 
 function attachRowResults(tasks, job) {
   const sourceRows = job?.row_results?.length ? job.row_results : rowResults.value;
@@ -266,6 +304,10 @@ function wait(milliseconds) {
 }
 
 async function pollJobStatuses() {
+  if (isPollingTick.value) {
+    return;
+  }
+
   const activeJobs = jobs.value.filter((job) =>
     !["ended", "failed", "completed"].includes(String(job.status).toLowerCase()),
   );
@@ -275,8 +317,10 @@ async function pollJobStatuses() {
     return;
   }
 
-  await Promise.all(
-    activeJobs.map(async (job) => {
+  isPollingTick.value = true;
+
+  try {
+    for (const [index, job] of activeJobs.entries()) {
       const response = await fetch("/api/job-status", {
         method: "POST",
         headers: {
@@ -291,22 +335,41 @@ async function pollJobStatuses() {
       const data = await response.json();
 
       if (!response.ok) {
+        const detail = data.detail || "Failed to fetch job status";
+        if (String(detail).toLowerCase().includes("throttle limit")) {
+          job.error = "Livestorm is rate limiting status checks. StormBatch will keep waiting and try again.";
+          if (index < activeJobs.length - 1) {
+            await wait(300);
+          }
+          continue;
+        }
         job.status = "failed";
-        job.error = data.detail || "Failed to fetch job status";
-        return;
+        job.error = detail;
+        if (index < activeJobs.length - 1) {
+          await wait(300);
+        }
+        continue;
       }
 
       job.status = data.status;
       job.tasks = attachRowResults(data.tasks || [], job);
       job.raw = data.raw || {};
-    }),
-  );
+      job.error = "";
+      if (index < activeJobs.length - 1) {
+        await wait(300);
+      }
+    }
+  } finally {
+    isPollingTick.value = false;
+  }
 
   const finished = jobs.value.every((job) =>
     ["ended", "failed", "completed"].includes(String(job.status).toLowerCase()),
   );
   if (finished) {
     stopPolling();
+    displayedProgressPercent.value = targetProgressPercent.value;
+    stopProgressAnimator();
     successMessage.value = "All Livestorm jobs finished.";
   }
 }
@@ -397,7 +460,9 @@ async function submitRegistration() {
   hasSubmittedJobs.value = false;
   totalSessionCount.value = expectedJobCount.value;
   createdSessionCount.value = 0;
+  displayedProgressPercent.value = 0;
   stopPolling();
+  startProgressAnimator();
 
   try {
     for (const sessionId of parsedSessionIds.value) {
@@ -466,13 +531,17 @@ async function submitRegistration() {
     }
 
     if (jobs.value.some((job) => !["ended", "failed", "completed"].includes(String(job.status).toLowerCase()))) {
-      poller.value = setInterval(pollJobStatuses, 2500);
+      poller.value = setInterval(pollJobStatuses, 12000);
       await pollJobStatuses();
     }
   } catch (error) {
     errorMessage.value = error.message;
   } finally {
     isSubmitting.value = false;
+    if (!isPollingJobs.value) {
+      displayedProgressPercent.value = targetProgressPercent.value;
+      stopProgressAnimator();
+    }
   }
 }
 </script>
@@ -601,24 +670,14 @@ async function submitRegistration() {
           <span class="step-label">Job progress</span>
           <h2>{{ progressTitle }}</h2>
           <p>
-            <template v-if="isSubmitting">
-              {{ registrationSummary.created }} of {{ registrationSummary.jobs }} job(s)
-              created.
-            </template>
-            <template v-else>
-              {{ registrationSummary.finished }} of {{ registrationSummary.jobs }} job(s)
-              finished.
-            </template>
+            StormBatch is pacing requests to stay under Livestorm rate limits,
+            then watching each job until it finishes.
           </p>
         </div>
         <strong class="progress-percent">{{ progressPercent }}%</strong>
       </div>
       <div class="progress-track">
         <div class="progress-fill" :style="{ width: `${progressPercent}%` }"></div>
-      </div>
-      <div class="progress-stats">
-        <span>{{ registrationSummary.totalTasks }} task result(s)</span>
-        <span>{{ registrationSummary.failedTasks }} failed task(s)</span>
       </div>
     </section>
 
@@ -1041,15 +1100,6 @@ body {
   border-radius: inherit;
   background: linear-gradient(90deg, var(--storm-mint), #3bd5bd, var(--storm-ink));
   transition: width 0.4s ease;
-}
-
-.progress-stats {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-  color: #64748b;
-  font-weight: 700;
 }
 
 .confirmation-card {
