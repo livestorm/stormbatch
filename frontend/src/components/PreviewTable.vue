@@ -44,18 +44,21 @@ defineProps({
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  color: #334155;
+  color: var(--color-text-neutral-base);
+  font-size: var(--text-content-text-bold-md);
+  line-height: var(--text-content-text-bold-md--line-height);
+  font-weight: var(--text-content-text-bold-md--font-weight);
 }
 
 .preview-heading span {
-  color: #64748b;
+  color: var(--color-text-neutral-secondary);
 }
 
 .table-wrap {
   overflow-x: auto;
-  border: 1px solid rgba(18, 38, 43, 0.14);
-  border-radius: 18px;
-  background: white;
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 8px;
+  background: var(--color-surface-neutral-100);
 }
 
 table {
@@ -66,20 +69,20 @@ table {
 th,
 td {
   padding: 13px 14px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--color-borders-neutral-light);
   text-align: left;
   white-space: nowrap;
 }
 
 th {
-  background: #d8fff4;
-  color: #12262b;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  background: var(--color-surface-neutral-200);
+  color: var(--color-text-neutral-secondary);
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
 tbody tr:hover {
-  background: #f8fffc;
+  background: var(--color-actions-neutral-hover-overlay);
 }
 </style>

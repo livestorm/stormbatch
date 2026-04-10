@@ -100,26 +100,28 @@ function onDrop(event) {
 .upload-copy span {
   display: inline-flex;
   width: fit-content;
-  margin-bottom: 8px;
-  color: #12262b;
-  background: #d8fff4;
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  margin-bottom: 12px;
+  color: var(--color-actions-primary-idle);
+  background: var(--color-actions-primary-idle-alpha-light);
+  border: 1px solid var(--color-borders-primary-light);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
 .upload-copy strong {
   display: block;
-  font-size: 1.25rem;
-  font-weight: 700;
+  color: var(--color-text-neutral-base);
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm--line-height);
+  font-weight: var(--text-title-sm--font-weight);
 }
 
 .upload-copy p {
   margin: 6px 0 0;
-  color: #64748b;
+  color: var(--color-text-neutral-secondary);
   line-height: 1.55;
 }
 
@@ -130,31 +132,27 @@ function onDrop(event) {
   min-height: 190px;
   padding: 24px;
   text-align: center;
-  border: 2px dashed rgba(18, 38, 43, 0.22);
-  border-radius: 22px;
-  background:
-    radial-gradient(circle at center, rgba(0, 229, 168, 0.16), transparent 55%),
-    #f8fffc;
+  border: 2px dashed var(--color-borders-neutral-light);
+  border-radius: 8px;
+  background: var(--color-surface-neutral-100);
   cursor: pointer;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
 
 .drop-zone:hover {
-  border-color: #12262b;
+  border-color: var(--color-borders-primary-default);
   transform: translateY(-1px);
 }
 
 .drop-zone.dragging {
-  border-color: #00e5a8;
-  background:
-    radial-gradient(circle at center, rgba(0, 229, 168, 0.28), transparent 58%),
-    #f0fff9;
+  border-color: var(--color-borders-primary-strong);
+  background: var(--color-surface-primary-100);
   transform: translateY(-2px) scale(1.01);
 }
 
 .drop-zone.selected {
   border-style: solid;
-  border-color: #12262b;
+  border-color: var(--color-borders-primary-default);
 }
 
 .drop-zone input {
@@ -164,18 +162,18 @@ function onDrop(event) {
 .file-icon {
   display: grid;
   place-items: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 18px;
-  color: white;
-  background: linear-gradient(135deg, #12262b, #00e5a8);
-  font-size: 0.8rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  color: var(--color-text-neutral-complementary-base);
+  background: var(--color-actions-primary-idle);
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
 .drop-zone small {
-  color: #64748b;
+  color: var(--color-text-neutral-secondary);
 }
 
 .secondary-button {
@@ -183,26 +181,31 @@ function onDrop(event) {
   justify-content: center;
   align-items: center;
   gap: 10px;
-  border: 1px solid #12262b;
-  background: #12262b;
-  color: white;
-  border-radius: 16px;
+  border: 1px solid var(--color-actions-primary-idle);
+  background: var(--color-actions-primary-idle);
+  color: var(--color-text-neutral-complementary-base);
+  border-radius: 8px;
   padding: 14px 16px;
-  font-weight: 900;
+  font-size: var(--text-action-button-md);
+  line-height: var(--text-action-button-md--line-height);
+  font-weight: var(--text-action-button-md--font-weight);
   cursor: pointer;
 }
 
 .secondary-button:disabled {
-  opacity: 0.7;
+  color: var(--color-text-neutral-tertiary);
+  background: var(--color-surface-neutral-300);
+  border-color: var(--color-borders-neutral-light);
+  opacity: 1;
   cursor: not-allowed;
 }
 
 .spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-top-color: white;
-  border-radius: 999px;
+  border: 2px solid var(--color-actions-neutral-complementary-idle-alpha-strong);
+  border-top-color: var(--color-text-neutral-complementary-base);
+  border-radius: 8px;
   animation: spin 0.8s linear infinite;
 }
 

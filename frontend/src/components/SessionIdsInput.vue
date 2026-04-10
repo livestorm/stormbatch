@@ -44,36 +44,52 @@ defineEmits(["update:modelValue"]);
 }
 
 .field-heading span {
-  font-weight: 700;
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
 .field-heading strong {
-  display: grid;
-  place-items: center;
-  min-width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  background: #12262b;
-  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 6px;
+  background: var(--color-actions-neutral-hover-overlay);
+  color: var(--color-text-neutral-secondary);
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
 textarea {
   width: 100%;
-  border: 1px solid rgba(18, 38, 43, 0.2);
-  border-radius: 16px;
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 8px;
   padding: 14px 16px;
-  font-size: 1rem;
+  color: var(--color-text-neutral-base);
+  font-size: var(--text-content-text-regular-lg);
+  line-height: var(--text-content-text-regular-lg--line-height);
   resize: vertical;
-  background: #fbfffd;
-  box-shadow: inset 0 1px 0 rgba(18, 38, 43, 0.06);
+  background: var(--color-surface-neutral-100);
+  box-shadow: none;
+}
+
+textarea::placeholder {
+  color: var(--color-text-neutral-tertiary);
 }
 
 textarea:focus {
-  outline: 3px solid rgba(0, 229, 168, 0.18);
-  border-color: #12262b;
+  border-color: var(--color-borders-primary-strong);
 }
 
 small {
-  color: #6b7280;
+  color: var(--color-text-neutral-secondary);
+  font-size: var(--text-content-legends-regular-md);
+  line-height: var(--text-content-legends-regular-md--line-height);
 }
 </style>

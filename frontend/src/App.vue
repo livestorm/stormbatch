@@ -174,19 +174,35 @@ const progressMessage = computed(() => {
 });
 
 const completionTitle = computed(() =>
-  registrationSummary.value.failedJobs ? "Some registrants need attention" : "Registration complete",
+  registrationSummary.value.failedJobs ? "Some registrants need attention" : "All registrants are in",
 );
 
 const completionMessage = computed(() => {
   if (registrationSummary.value.failedJobs) {
     return "Some registrants need attention. Review the details below.";
   }
-  return "Batch registration finished successfully.";
+  return "Nice work. Livestorm accepted the full batch.";
 });
 
 function resetMessages() {
   errorMessage.value = "";
   successMessage.value = "";
+}
+
+async function readApiResponse(response, fallbackMessage) {
+  const text = await response.text();
+  if (!text.trim()) {
+    if (!response.ok) {
+      throw new Error(fallbackMessage);
+    }
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(fallbackMessage);
+  }
 }
 
 function onFileSelected(file) {
@@ -236,7 +252,7 @@ async function loadPreview() {
       method: "POST",
       body: formData,
     });
-    const data = await response.json();
+    const data = await readApiResponse(response, "Preview failed. The server returned an empty or invalid response.");
 
     if (!response.ok) {
       throw new Error(data.detail || "Preview failed");
@@ -312,7 +328,7 @@ async function pollJobUntilFinished(job) {
         job_id: job.job_id,
       }),
     });
-    const data = await response.json();
+    const data = await readApiResponse(response, "Failed to fetch job status. The server returned an empty or invalid response.");
 
     if (!response.ok) {
       const detail = data.detail || "Failed to fetch job status";
@@ -366,7 +382,7 @@ async function retryFailedRows(job) {
         registrants: failedRegistrants,
       }),
     });
-    const data = await response.json();
+    const data = await readApiResponse(response, "Retry failed. The server returned an empty or invalid response.");
 
     if (!response.ok) {
       throw new Error(data.detail || "Retry failed");
@@ -445,7 +461,7 @@ async function submitRegistration() {
           method: "POST",
           body: formData,
         });
-        const data = await response.json();
+        const data = await readApiResponse(response, "Registration failed. The server returned an empty or invalid response.");
 
         if (!response.ok) {
           jobs.value.push({
@@ -516,11 +532,6 @@ async function submitRegistration() {
         </div>
         <h1>Turn an Excel sheet into Livestorm session registrants.</h1>
       </div>
-      <div class="hero-card">
-        <span>Email required</span>
-        <strong>Everything else is optional prefill data.</strong>
-        <p>Attendees can complete other required event fields before joining.</p>
-      </div>
     </section>
 
     <section class="workflow-grid">
@@ -549,15 +560,11 @@ async function submitRegistration() {
         <div>
           <span class="step-label">Step 3</span>
           <h2>Preview registrants</h2>
-          <p>
-            {{ preview.row_count }} row(s), {{ preview.headers.length }} column(s).
-            Email is required. Optional columns are dropped unless you include them
-            with a Livestorm field ID that exists on the session.
-          </p>
+          <p>{{ preview.row_count }} rows, {{ preview.headers.length }} columns</p>
         </div>
         <div class="preview-statuses">
           <div class="status-pill" :class="{ ok: hasEmailColumn, error: !hasEmailColumn }">
-            {{ hasEmailColumn ? `Email column: ${emailColumn}` : "Email column missing" }}
+            {{ hasEmailColumn ? "Email detected" : "Email column missing" }}
           </div>
           <div v-if="duplicateEmails.length" class="warning-pill">
             Duplicate emails: {{ duplicateEmails.join(", ") }}
@@ -641,7 +648,7 @@ async function submitRegistration() {
       :class="{ failed: registrationSummary.failedJobs }"
     >
       <div>
-        <span class="confirmation-icon">{{ registrationSummary.failedJobs ? "!" : "OK" }}</span>
+        <span class="confirmation-icon">{{ registrationSummary.failedJobs ? "!" : "✓" }}</span>
       </div>
       <div>
         <h2>{{ completionTitle }}</h2>
@@ -669,125 +676,94 @@ async function submitRegistration() {
 </template>
 
 <style>
-:root {
-  --storm-ink: #12262b;
-  --storm-ink-soft: #21383e;
-  --storm-mint: #00e5a8;
-  --storm-mint-soft: #d8fff4;
-  --storm-sand: #fbf7ef;
-  --storm-line: rgba(18, 38, 43, 0.14);
-  font-family: "Avenir Next", "Segoe UI", sans-serif;
-  color: var(--storm-ink);
-  background:
-    radial-gradient(circle at 8% 0%, rgba(0, 229, 168, 0.2), transparent 28%),
-    radial-gradient(circle at 92% 10%, rgba(18, 38, 43, 0.1), transparent 26%),
-    linear-gradient(135deg, #fbf7ef 0%, #f4fbf8 48%, #edf7f4 100%);
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  min-width: 320px;
-}
-
 .page-shell {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 36px 16px 56px;
+  padding: 40px 16px 56px;
+  min-height: 100vh;
 }
 
 .hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 24px;
-  align-items: end;
-  margin-bottom: 24px;
+  display: block;
+  margin-bottom: 28px;
 }
 
 .brand-lockup {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
   margin-bottom: 18px;
 }
 
 .brand-lockup img {
-  width: 46px;
-  height: 46px;
-  border-radius: 14px;
-  box-shadow: 0 10px 24px rgba(18, 38, 43, 0.12);
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  object-fit: contain;
+  box-shadow: none;
 }
 
 .brand-lockup span {
   display: block;
-  color: #607075;
-  font-size: 0.86rem;
-  font-weight: 700;
+  margin-top: 2px;
+  color: var(--color-text-neutral-secondary);
+  font-size: var(--text-content-text-regular-md);
+  line-height: var(--text-content-text-regular-md--line-height);
+  font-weight: var(--text-content-text-regular-md--font-weight);
 }
 
 .eyebrow {
-  margin: 0 0 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  font-size: 0.75rem;
-  color: var(--storm-ink);
-  font-weight: 800;
+  margin: 0;
+  color: var(--color-text-neutral-base);
+  font-size: var(--text-content-text-bold-lg);
+  line-height: var(--text-content-text-bold-lg--line-height);
+  letter-spacing: var(--text-content-text-bold-lg--letter-spacing);
+  font-weight: var(--text-content-text-bold-lg--font-weight);
 }
 
 .hero h1 {
-  max-width: 760px;
+  max-width: 700px;
   margin: 0;
-  font-size: clamp(1.95rem, 4vw, 3.35rem);
-  line-height: 1.04;
-  letter-spacing: -0.045em;
+  color: var(--color-text-neutral-secondary);
+  font-size: var(--text-title-md);
+  line-height: var(--text-title-md--line-height);
+  letter-spacing: var(--text-title-md--letter-spacing);
+  font-weight: var(--text-title-md--font-weight);
 }
 
 .intro {
   max-width: 760px;
-  color: #4f6268;
-  font-size: 1.05rem;
-  line-height: 1.7;
+  color: var(--color-text-neutral-secondary);
+  font-size: var(--text-content-text-regular-lg);
+  line-height: var(--text-content-text-regular-lg--line-height);
 }
 
-.hero-card,
 .confirmation-card,
 .cta-card {
-  border: 1px solid var(--storm-line);
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(216, 255, 244, 0.82)),
-    repeating-linear-gradient(45deg, rgba(18, 38, 43, 0.035) 0 8px, transparent 8px 16px);
-  border-radius: 24px;
+  border: 1px solid var(--color-borders-neutral-light);
+  background: var(--color-surface-neutral-200);
+  border-radius: 8px;
   padding: 22px;
-  box-shadow: 0 18px 50px rgba(18, 38, 43, 0.08);
+  box-shadow: none;
 }
 
-.hero-card span,
 .step-label {
   display: inline-flex;
   width: fit-content;
-  margin-bottom: 8px;
-  color: var(--storm-ink);
-  background: var(--storm-mint-soft);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  margin-bottom: 12px;
+  color: var(--color-actions-primary-idle);
+  background: var(--color-actions-primary-idle-alpha-light);
+  border: 1px solid var(--color-borders-primary-light);
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
-.hero-card strong {
-  display: block;
-  font-size: 1.15rem;
-}
-
-.hero-card p,
 .cta-card p {
   margin-bottom: 0;
-  color: #64748b;
+  color: var(--color-text-neutral-secondary);
 }
 
 .workflow-grid {
@@ -798,13 +774,12 @@ body {
 }
 
 .panel {
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid var(--storm-line);
-  border-radius: 24px;
+  background: var(--color-surface-neutral-200);
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 8px;
   padding: 22px;
   margin-bottom: 18px;
-  box-shadow: 0 18px 50px rgba(18, 38, 43, 0.07);
-  backdrop-filter: blur(14px);
+  box-shadow: none;
 }
 
 .step-panel {
@@ -812,7 +787,7 @@ body {
 }
 
 .preview-panel {
-  border-color: rgba(18, 38, 43, 0.22);
+  border-color: var(--color-borders-neutral-default);
   margin-top: 16px;
 }
 
@@ -829,42 +804,50 @@ body {
 .cta-card h2,
 .confirmation-card h2 {
   margin: 0 0 6px;
-  letter-spacing: -0.03em;
+  color: var(--color-text-neutral-base);
+  font-size: var(--text-title-md);
+  line-height: var(--text-title-md--line-height);
+  letter-spacing: var(--text-title-md--letter-spacing);
+  font-weight: var(--text-title-md--font-weight);
 }
 
 .panel-header p,
 .confirmation-card p {
   margin: 0;
-  color: #6b7280;
+  color: var(--color-text-neutral-secondary);
 }
 
 .notice {
   margin-top: 16px;
   margin-bottom: 18px;
   padding: 14px 16px;
-  border-radius: 16px;
-  font-weight: 700;
+  border-radius: 8px;
+  font-size: var(--text-content-text-bold-md);
+  line-height: var(--text-content-text-bold-md--line-height);
+  font-weight: var(--text-content-text-bold-md--font-weight);
 }
 
 .notice.error {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fecaca;
+  background: var(--color-surface-danger-300);
+  color: var(--color-text-danger-secondary);
+  border: 1px solid var(--color-borders-danger-light);
 }
 
 .notice.success {
-  background: #ecfdf5;
-  color: #047857;
-  border: 1px solid #a7f3d0;
+  background: var(--color-surface-success-300);
+  color: var(--color-text-success-secondary);
+  border: 1px solid var(--color-borders-success-light);
 }
 
 .warning-pill {
-  background: #fff7ed;
-  color: #c2410c;
+  background: var(--color-surface-warning-300);
+  color: var(--color-text-warning-secondary);
+  border: 1px solid var(--color-borders-warning-light);
   padding: 10px 12px;
-  border-radius: 999px;
-  font-size: 0.9rem;
-  font-weight: 800;
+  border-radius: 8px;
+  font-size: var(--text-content-text-bold-md);
+  line-height: var(--text-content-text-bold-md--line-height);
+  font-weight: var(--text-content-text-bold-md--font-weight);
 }
 
 .preview-statuses {
@@ -879,20 +862,23 @@ body {
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  border-radius: 999px;
-  padding: 10px 12px;
-  font-size: 0.9rem;
-  font-weight: 800;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
 .status-pill.ok {
-  color: #12262b;
-  background: #d8fff4;
+  color: var(--color-text-neutral-secondary);
+  background: transparent;
+  border: 1px solid var(--color-borders-neutral-light);
 }
 
 .status-pill.error {
-  color: #b91c1c;
-  background: #fef2f2;
+  color: var(--color-text-danger-secondary);
+  background: var(--color-surface-danger-300);
+  border: 1px solid var(--color-borders-danger-light);
 }
 
 .attribute-preview {
@@ -906,14 +892,14 @@ body {
   display: grid;
   gap: 10px;
   padding: 14px;
-  border: 1px solid var(--storm-line);
-  border-radius: 16px;
-  background: rgba(18, 38, 43, 0.035);
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 8px;
+  background: var(--color-surface-neutral-100);
 }
 
 .column-card.included {
-  border-color: rgba(0, 229, 168, 0.55);
-  background: #f8fffc;
+  border-color: var(--color-borders-success-light);
+  background: var(--color-surface-success-300);
 }
 
 .column-card > div:first-child strong,
@@ -923,22 +909,24 @@ body {
 
 .column-card > div:first-child span {
   margin-top: 3px;
-  color: #607075;
-  font-size: 0.86rem;
+  color: var(--color-text-neutral-secondary);
+  font-size: var(--text-content-legends-regular-md);
+  line-height: var(--text-content-legends-regular-md--line-height);
 }
 
 .column-card input[type="text"],
 .column-card > input {
   width: 100%;
-  border: 1px solid rgba(18, 38, 43, 0.18);
-  border-radius: 12px;
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 8px;
   padding: 10px 12px;
-  background: white;
+  color: var(--color-text-neutral-base);
+  background: var(--color-surface-neutral-100);
 }
 
 .column-card > input:disabled {
-  color: #94a3b8;
-  background: #f8fafc;
+  color: var(--color-text-neutral-tertiary);
+  background: var(--color-surface-neutral-200);
 }
 
 .column-actions {
@@ -972,28 +960,28 @@ body {
   width: 48px;
   height: 28px;
   padding: 3px;
-  border-radius: 999px;
-  background: #d1d5db;
+  border-radius: 8px;
+  background: var(--color-surface-neutral-100);
   transition: background 0.2s ease;
 }
 
 .toggle-label {
   line-height: 1;
-  color: var(--storm-ink);
-  font-size: 0.95rem;
+  color: var(--color-text-neutral-base);
+  font-size: var(--text-content-text-bold-md);
 }
 
 .toggle-thumb {
   width: 22px;
   height: 22px;
-  border-radius: 999px;
-  background: white;
-  box-shadow: 0 2px 8px rgba(18, 38, 43, 0.2);
+  border-radius: 6px;
+  background: var(--color-surface-neutral-bg-main);
+  box-shadow: 0 2px 8px var(--color-shadow-neutral-200);
   transition: transform 0.2s ease;
 }
 
 .include-toggle input:checked + .toggle-track {
-  background: var(--storm-ink);
+  background: var(--color-actions-success-idle);
 }
 
 .include-toggle input:checked + .toggle-track .toggle-thumb {
@@ -1001,7 +989,7 @@ body {
 }
 
 .include-toggle input:focus-visible + .toggle-track {
-  outline: 3px solid rgba(0, 229, 168, 0.35);
+  outline: 3px solid var(--color-focus-ring);
   outline-offset: 2px;
 }
 
@@ -1016,43 +1004,55 @@ body {
 .primary-button {
   width: 100%;
   border: none;
-  border-radius: 18px;
+  border-radius: 8px;
   padding: 16px 18px;
-  font-size: 1rem;
-  font-weight: 900;
-  color: white;
-  background: linear-gradient(135deg, var(--storm-ink), var(--storm-ink-soft));
+  font-size: var(--text-action-button-lg);
+  line-height: var(--text-action-button-lg--line-height);
+  font-weight: var(--text-action-button-lg--font-weight);
+  color: var(--color-text-neutral-complementary-base);
+  background: var(--color-actions-primary-idle);
+  border: 1px solid var(--color-actions-primary-idle);
   cursor: pointer;
-  box-shadow: 0 14px 28px rgba(18, 38, 43, 0.24);
+  box-shadow: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: var(--color-actions-primary-idle-alpha-strong);
+  border-color: var(--color-actions-primary-idle-alpha-strong);
 }
 
 .primary-button:disabled {
-  opacity: 0.7;
+  color: var(--color-text-neutral-tertiary);
+  background: var(--color-surface-neutral-300);
+  border: 1px solid var(--color-borders-neutral-light);
+  opacity: 1;
   cursor: not-allowed;
   box-shadow: none;
 }
 
 .progress-panel {
-  border-color: rgba(18, 38, 43, 0.2);
+  border-color: var(--color-borders-primary-light);
 }
 
 .progress-percent {
-  font-size: 2rem;
-  color: var(--storm-ink);
+  font-size: var(--text-title-lg);
+  line-height: var(--text-title-lg--line-height);
+  color: var(--color-text-primary-base);
 }
 
 .progress-track {
   height: 14px;
   overflow: hidden;
-  border-radius: 999px;
-  background: #e2e8f0;
+  border-radius: 8px;
+  background: var(--color-surface-neutral-300);
 }
 
 .progress-fill {
   height: 100%;
   min-width: 8px;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--storm-mint), #3bd5bd, var(--storm-ink));
+  background: var(--color-actions-primary-idle);
   transition: width 0.4s ease;
 }
 
@@ -1062,45 +1062,47 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 18px;
+  border-color: var(--color-borders-success-light);
+  background: var(--color-surface-success-300);
 }
 
 .confirmation-card.failed {
-  border-color: #fecaca;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(254, 242, 242, 0.9)),
-    repeating-linear-gradient(45deg, rgba(185, 28, 28, 0.035) 0 8px, transparent 8px 16px);
+  border-color: var(--color-borders-danger-light);
+  background: var(--color-surface-danger-300);
 }
 
 .confirmation-icon {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: var(--storm-ink);
-  color: white;
-  font-weight: 900;
-  font-size: 1.4rem;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  background: var(--color-actions-success-idle);
+  color: var(--color-text-neutral-complementary-base);
+  font-size: var(--text-title-md);
+  line-height: var(--text-title-md--line-height);
+  font-weight: var(--text-title-md--font-weight);
 }
 
 .confirmation-card.failed .confirmation-icon {
-  background: #b91c1c;
+  background: var(--color-actions-danger-idle);
 }
 
 .new-batch-button {
   flex: 0 0 auto;
-  border: 1px solid var(--storm-ink);
-  border-radius: 999px;
+  border: 1px solid var(--color-borders-neutral-default);
+  border-radius: 8px;
   padding: 12px 16px;
-  color: var(--storm-ink);
-  background: white;
-  font-weight: 900;
+  color: var(--color-text-neutral-base);
+  background: var(--color-surface-neutral-100);
+  font-size: var(--text-action-button-md);
+  line-height: var(--text-action-button-md--line-height);
+  font-weight: var(--text-action-button-md--font-weight);
   cursor: pointer;
 }
 
 .new-batch-button:hover {
-  color: white;
-  background: var(--storm-ink);
+  background: var(--color-actions-neutral-hover-overlay);
 }
 
 .results-header {
@@ -1121,11 +1123,9 @@ body {
   }
 
   .panel,
-  .hero-card,
   .confirmation-card,
   .cta-card {
     padding: 16px;
-    border-radius: 18px;
   }
 
   .confirmation-card {

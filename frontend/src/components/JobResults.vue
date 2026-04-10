@@ -186,24 +186,24 @@ function cardClass(job) {
 }
 
 .job-card {
-  border: 1px solid rgba(18, 38, 43, 0.14);
-  background: #ffffff;
-  border-radius: 18px;
+  border: 1px solid var(--color-borders-neutral-light);
+  background: var(--color-surface-neutral-100);
+  border-radius: 8px;
   padding: 18px;
 }
 
 .job-card.succeeded {
-  border-color: rgba(0, 229, 168, 0.5);
-  background: #f8fffc;
+  border-color: var(--color-borders-success-light);
+  background: var(--color-surface-success-300);
 }
 
 .job-card.has-failures {
-  border-color: #fecaca;
-  background: #fffafa;
+  border-color: var(--color-borders-danger-light);
+  background: var(--color-surface-danger-300);
 }
 
 .job-card.processing {
-  background: #fbf7ef;
+  background: var(--color-surface-warning-300);
 }
 
 .job-header {
@@ -221,24 +221,29 @@ p {
 
 h3 {
   margin: 4px 0 6px;
-  font-size: 1rem;
+  color: var(--color-text-neutral-base);
+  font-size: var(--text-content-text-bold-lg);
+  line-height: var(--text-content-text-bold-lg--line-height);
+  font-weight: var(--text-content-text-bold-lg--font-weight);
   overflow-wrap: anywhere;
 }
 
 .session-label {
-  color: #607075;
-  font-size: 0.78rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
 .status {
-  background: #d8fff4;
-  color: #12262b;
-  border-radius: 999px;
+  background: var(--color-surface-primary-100);
+  color: var(--color-text-primary-base);
+  border: 1px solid var(--color-borders-primary-light);
+  border-radius: 8px;
   padding: 8px 12px;
-  font-weight: 900;
+  font-size: var(--text-content-text-bold-md);
+  line-height: var(--text-content-text-bold-md--line-height);
+  font-weight: var(--text-content-text-bold-md--font-weight);
   text-transform: capitalize;
 }
 
@@ -248,7 +253,7 @@ h3 {
   gap: 10px;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid rgba(18, 38, 43, 0.1);
+  border-top: 1px solid var(--color-borders-neutral-light);
 }
 
 .failed-header {
@@ -262,34 +267,36 @@ h3 {
 .failed-row,
 .retry-row {
   padding: 12px;
-  background: white;
-  border: 1px solid rgba(18, 38, 43, 0.1);
-  border-radius: 14px;
+  background: var(--color-surface-neutral-100);
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 8px;
 }
 
 .failed-row p,
 .retry-row p,
 .job-error {
   margin-top: 4px;
-  color: #b91c1c;
+  color: var(--color-text-danger-secondary);
 }
 
 .job-warning {
   margin-top: 4px;
-  color: #8a5a00;
+  color: var(--color-text-warning-secondary);
 }
 
 .failed-row.duplicate p {
-  color: #3730a3;
+  color: var(--color-text-primary-secondary);
 }
 
 .retry-button {
   border: none;
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 10px 14px;
-  color: white;
-  background: #12262b;
-  font-weight: 900;
+  color: var(--color-text-neutral-complementary-base);
+  background: var(--color-actions-primary-idle);
+  font-size: var(--text-action-button-md);
+  line-height: var(--text-action-button-md--line-height);
+  font-weight: var(--text-action-button-md--font-weight);
   cursor: pointer;
 }
 
@@ -305,25 +312,26 @@ h3 {
 
 .retry-status {
   width: fit-content;
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 5px 9px;
-  font-size: 0.8rem;
-  font-weight: 900;
+  font-size: var(--text-content-badges-bold-md);
+  line-height: var(--text-content-badges-bold-md--line-height);
+  font-weight: var(--text-content-badges-bold-md--font-weight);
   text-transform: capitalize;
 }
 
 .retry-status.succeeded {
-  background: #d8fff4;
-  color: #12262b;
+  background: var(--color-surface-success-300);
+  color: var(--color-text-success-secondary);
 }
 
 .retry-status.registered {
-  background: #eef2ff;
-  color: #3730a3;
+  background: var(--color-surface-primary-100);
+  color: var(--color-text-primary-secondary);
 }
 
 .retry-status.failed {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--color-surface-danger-300);
+  color: var(--color-text-danger-secondary);
 }
 </style>
