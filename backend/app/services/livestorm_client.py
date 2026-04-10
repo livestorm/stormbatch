@@ -114,59 +114,16 @@ class LivestormClient:
 
         return response
 
-    async def list_job_tasks(self, job_id: str, page_size: int = 50) -> list[dict[str, Any]]:
-        page_number = 0
-        tasks = []
+    async def list_job_tasks(self, job_id: str) -> list[dict[str, Any]]:
+        # The Livestorm /v1/jobs/{job_id}/tasks endpoint returns a 500 error when
+        # any pagination query params are passed, so we fetch all tasks in one call.
+        tasks_response = await self._client.get(f"/v1/jobs/{job_id}/tasks")
+        if tasks_response.status_code >= 400:
+            raise self._build_error(tasks_response, "Unable to fetch Livestorm job tasks")
 
-        while True:
-            tasks_response = await self._client.get(
-                f"/v1/jobs/{job_id}/tasks",
-                params={
-                    "page[number]": page_number,
-                    "page[size]": page_size,
-                },
-            )
-            if tasks_response.status_code >= 400:
-                raise self._build_error(tasks_response, "Unable to fetch Livestorm job tasks")
-
-            tasks_data = tasks_response.json()
-            page_tasks = tasks_data.get("data", tasks_data)
-            if not isinstance(page_tasks, list):
-                page_tasks = []
-            tasks.extend(page_tasks)
-
-            if not page_tasks:
-                break
-
-            meta = tasks_data.get("meta", {})
-            pagination = meta.get("pagination", meta.get("page", meta))
-            next_page = (
-                pagination.get("next_page")
-                or pagination.get("nextPage")
-                or pagination.get("next")
-            )
-            total_pages = (
-                pagination.get("total_pages")
-                or pagination.get("totalPages")
-                or pagination.get("page_count")
-                or pagination.get("pageCount")
-                or pagination.get("last")
-            )
-            current_page = (
-                pagination.get("current_page")
-                or pagination.get("currentPage")
-                or pagination.get("number")
-                or page_number
-            )
-
-            if total_pages and int(current_page) + 1 >= int(total_pages):
-                break
-            if next_page is None:
-                break
-
-            page_number = int(next_page) if next_page is not None else page_number + 1
-
-        return tasks
+        tasks_data = tasks_response.json()
+        page_tasks = tasks_data.get("data", tasks_data)
+        return page_tasks if isinstance(page_tasks, list) else []
 
     async def list_session_people(
         self,

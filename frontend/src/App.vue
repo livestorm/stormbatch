@@ -5,7 +5,7 @@ import FileUpload from "./components/FileUpload.vue";
 import JobResults from "./components/JobResults.vue";
 import PreviewTable from "./components/PreviewTable.vue";
 import SessionIdsInput from "./components/SessionIdsInput.vue";
-import livestormIcon from "../assets/Icon-Livestorm-Primary.png";
+import livestormIcon from "../assets/Icon-Livestorm-Tertiary-Light.png";
 
 const BULK_JOB_CHUNK_SIZE = 50;
 const JOB_STATUS_POLL_INTERVAL_MS = 5000;
@@ -85,7 +85,8 @@ function isAlreadyRegisteredMessage(message) {
   const normalized = String(message).toLowerCase();
   return normalized.includes("already been invited")
     || normalized.includes("already registered")
-    || normalized.includes("identity has already been taken");
+    || normalized.includes("has already been taken")
+    || normalized.includes("already been registered");
 }
 
 function failedJobTasks(job) {
@@ -138,6 +139,10 @@ const registrationSummary = computed(() => {
     return String(taskStatus(task)).toLowerCase() === "failed";
   }).length;
   const failedJobs = jobs.value.filter((job) => hasActionableFailure(job)).length;
+  const alreadyRegisteredOnlyJobs = jobs.value.filter((job) => {
+    const failed = failedJobTasks(job);
+    return failed.length > 0 && !hasActionableFailure(job);
+  }).length;
 
   return {
     jobs: totalSessionCount.value || jobs.value.length || (isSubmitting.value ? expectedJobCount.value : 0),
@@ -146,6 +151,7 @@ const registrationSummary = computed(() => {
     totalTasks: taskResults.length,
     failedTasks,
     failedJobs,
+    alreadyRegisteredOnlyJobs,
   };
 });
 
@@ -178,9 +184,9 @@ const completionTitle = computed(() =>
 );
 
 const completionMessage = computed(() => {
-  if (registrationSummary.value.failedJobs) {
-    return "Some registrants need attention. Review the details below.";
-  }
+  const { failedJobs, alreadyRegisteredOnlyJobs } = registrationSummary.value;
+  if (failedJobs) return "Some rows couldn't be registered. Check the details below and retry if needed.";
+  if (alreadyRegisteredOnlyJobs) return "Nice work. Some were already registered in Livestorm — they're all set.";
   return "Nice work. Livestorm accepted the full batch.";
 });
 
@@ -522,16 +528,13 @@ async function submitRegistration() {
 <template>
   <main class="page-shell">
     <section class="hero">
-      <div>
-        <div class="brand-lockup">
-          <img :src="livestormIcon" alt="Livestorm" />
-          <div>
-            <p class="eyebrow">StormBatch</p>
-            <span>Powered by Livestorm workflows</span>
-          </div>
-        </div>
-        <h1>Turn an Excel sheet into Livestorm session registrants.</h1>
+      <div class="brand-lockup">
+        <img :src="livestormIcon" alt="Livestorm" />
+        <span class="brand-divider"></span>
+        <span class="brand-name">StormBatch</span>
       </div>
+      <h1>Turn a spreadsheet into<br>Livestorm registrants.</h1>
+      <p class="hero-tagline">Upload your .xlsx or .csv, map columns to Livestorm fields, and batch register attendees to any session.</p>
     </section>
 
     <section class="workflow-grid">
@@ -647,8 +650,14 @@ async function submitRegistration() {
       class="confirmation-card"
       :class="{ failed: registrationSummary.failedJobs }"
     >
-      <div>
-        <span class="confirmation-icon">{{ registrationSummary.failedJobs ? "!" : "✓" }}</span>
+      <div class="confirmation-icon">
+        <svg v-if="!registrationSummary.failedJobs" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="12" y1="8" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
       </div>
       <div>
         <h2>{{ completionTitle }}</h2>
@@ -676,110 +685,88 @@ async function submitRegistration() {
 </template>
 
 <style>
+/* ── Shell ────────────────────────────────────────── */
+
 .page-shell {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 40px 16px 56px;
+  padding: 48px 20px 64px;
   min-height: 100vh;
 }
 
+/* ── Hero ─────────────────────────────────────────── */
+
 .hero {
-  display: block;
-  margin-bottom: 28px;
+  padding-bottom: 48px;
+  margin-bottom: 40px;
+  border-bottom: 1px solid var(--color-borders-neutral-light);
 }
 
 .brand-lockup {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  margin-bottom: 18px;
+  margin-bottom: 32px;
 }
 
 .brand-lockup img {
-  width: 36px;
-  height: 36px;
-  border-radius: 6px;
+  width: 26px;
+  height: 26px;
   object-fit: contain;
-  box-shadow: none;
 }
 
-.brand-lockup span {
+.brand-divider {
   display: block;
-  margin-top: 2px;
-  color: var(--color-text-neutral-secondary);
-  font-size: var(--text-content-text-regular-md);
-  line-height: var(--text-content-text-regular-md--line-height);
-  font-weight: var(--text-content-text-regular-md--font-weight);
+  width: 1px;
+  height: 16px;
+  background: var(--color-borders-neutral-light);
+  flex-shrink: 0;
 }
 
-.eyebrow {
-  margin: 0;
-  color: var(--color-text-neutral-base);
-  font-size: var(--text-content-text-bold-lg);
-  line-height: var(--text-content-text-bold-lg--line-height);
-  letter-spacing: var(--text-content-text-bold-lg--letter-spacing);
-  font-weight: var(--text-content-text-bold-lg--font-weight);
+.brand-name {
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-legends-bold-md);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
 .hero h1 {
   max-width: 700px;
+  margin: 0 0 16px;
+  color: var(--color-text-neutral-base);
+  font-size: clamp(34px, 5vw, 52px);
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.hero-tagline {
+  max-width: 540px;
   margin: 0;
   color: var(--color-text-neutral-secondary);
-  font-size: var(--text-title-md);
-  line-height: var(--text-title-md--line-height);
-  letter-spacing: var(--text-title-md--letter-spacing);
-  font-weight: var(--text-title-md--font-weight);
+  font-size: var(--text-content-text-regular-md);
+  line-height: 1.65;
 }
 
-.intro {
-  max-width: 760px;
-  color: var(--color-text-neutral-secondary);
-  font-size: var(--text-content-text-regular-lg);
-  line-height: var(--text-content-text-regular-lg--line-height);
-}
-
-.confirmation-card,
-.cta-card {
-  border: 1px solid var(--color-borders-neutral-light);
-  background: var(--color-surface-neutral-200);
-  border-radius: 8px;
-  padding: 22px;
-  box-shadow: none;
-}
-
-.step-label {
-  display: inline-flex;
-  width: fit-content;
-  margin-bottom: 12px;
-  color: var(--color-actions-primary-idle);
-  background: var(--color-actions-primary-idle-alpha-light);
-  border: 1px solid var(--color-borders-primary-light);
-  border-radius: 6px;
-  padding: 4px 9px;
-  font-size: var(--text-content-legends-bold-md);
-  line-height: var(--text-content-legends-bold-md--line-height);
-  font-weight: var(--text-content-legends-bold-md--font-weight);
-}
-
-.cta-card p {
-  margin-bottom: 0;
-  color: var(--color-text-neutral-secondary);
-}
+/* ── Layout ───────────────────────────────────────── */
 
 .workflow-grid {
   display: grid;
   grid-template-columns: 0.95fr 1.05fr;
-  gap: 18px;
+  gap: 20px;
   align-items: stretch;
 }
+
+/* ── Panels ───────────────────────────────────────── */
 
 .panel {
   background: var(--color-surface-neutral-200);
   border: 1px solid var(--color-borders-neutral-light);
-  border-radius: 8px;
-  padding: 22px;
-  margin-bottom: 18px;
-  box-shadow: none;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .step-panel {
@@ -788,7 +775,7 @@ async function submitRegistration() {
 
 .preview-panel {
   border-color: var(--color-borders-neutral-default);
-  margin-top: 16px;
+  margin-top: 24px;
 }
 
 .panel-header {
@@ -797,7 +784,7 @@ async function submitRegistration() {
   gap: 16px;
   align-items: center;
   flex-wrap: wrap;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
 }
 
 .panel-header h2,
@@ -817,11 +804,30 @@ async function submitRegistration() {
   color: var(--color-text-neutral-secondary);
 }
 
+/* ── Step labels ──────────────────────────────────── */
+
+.step-label {
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 16px;
+  color: var(--color-actions-primary-idle);
+  background: var(--color-actions-primary-idle-alpha-light);
+  border: 1px solid var(--color-borders-primary-light);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+  letter-spacing: 0.04em;
+}
+
+/* ── Notices ──────────────────────────────────────── */
+
 .notice {
   margin-top: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 20px;
   padding: 14px 16px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: var(--text-content-text-bold-md);
   line-height: var(--text-content-text-bold-md--line-height);
   font-weight: var(--text-content-text-bold-md--font-weight);
@@ -843,7 +849,7 @@ async function submitRegistration() {
   background: var(--color-surface-warning-300);
   color: var(--color-text-warning-secondary);
   border: 1px solid var(--color-borders-warning-light);
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-radius: 8px;
   font-size: var(--text-content-text-bold-md);
   line-height: var(--text-content-text-bold-md--line-height);
@@ -857,13 +863,12 @@ async function submitRegistration() {
   align-items: center;
 }
 
-.status-pill,
-.attribute-chip {
+.status-pill {
   display: inline-flex;
   align-items: center;
   width: fit-content;
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 6px 10px;
   font-size: var(--text-content-legends-bold-md);
   line-height: var(--text-content-legends-bold-md--line-height);
   font-weight: var(--text-content-legends-bold-md--font-weight);
@@ -881,11 +886,13 @@ async function submitRegistration() {
   border: 1px solid var(--color-borders-danger-light);
 }
 
+/* ── Column mapping ───────────────────────────────── */
+
 .attribute-preview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .column-card {
@@ -893,8 +900,9 @@ async function submitRegistration() {
   gap: 10px;
   padding: 14px;
   border: 1px solid var(--color-borders-neutral-light);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--color-surface-neutral-100);
+  transition: border-color 0.15s ease;
 }
 
 .column-card.included {
@@ -922,12 +930,20 @@ async function submitRegistration() {
   padding: 10px 12px;
   color: var(--color-text-neutral-base);
   background: var(--color-surface-neutral-100);
+  transition: border-color 0.15s ease;
+}
+
+.column-card > input:focus {
+  border-color: var(--color-borders-primary-strong);
+  outline: none;
 }
 
 .column-card > input:disabled {
   color: var(--color-text-neutral-tertiary);
   background: var(--color-surface-neutral-200);
 }
+
+/* ── Toggle switch ────────────────────────────────── */
 
 .column-actions {
   display: flex;
@@ -945,7 +961,7 @@ async function submitRegistration() {
 
 .include-toggle.disabled {
   cursor: not-allowed;
-  opacity: 0.75;
+  opacity: 0.6;
 }
 
 .include-toggle input {
@@ -957,11 +973,11 @@ async function submitRegistration() {
 .toggle-track {
   display: inline-flex;
   align-items: center;
-  width: 48px;
-  height: 28px;
+  width: 44px;
+  height: 26px;
   padding: 3px;
-  border-radius: 8px;
-  background: var(--color-surface-neutral-100);
+  border-radius: 13px;
+  background: var(--color-surface-neutral-300);
   transition: background 0.2s ease;
 }
 
@@ -972,12 +988,12 @@ async function submitRegistration() {
 }
 
 .toggle-thumb {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: var(--color-surface-neutral-bg-main);
-  box-shadow: 0 2px 8px var(--color-shadow-neutral-200);
-  transition: transform 0.2s ease;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: transform 0.2s ease, background 0.2s ease;
 }
 
 .include-toggle input:checked + .toggle-track {
@@ -985,7 +1001,8 @@ async function submitRegistration() {
 }
 
 .include-toggle input:checked + .toggle-track .toggle-thumb {
-  transform: translateX(20px);
+  transform: translateX(18px);
+  background: #ffffff;
 }
 
 .include-toggle input:focus-visible + .toggle-track {
@@ -993,43 +1010,60 @@ async function submitRegistration() {
   outline-offset: 2px;
 }
 
+/* ── CTA card ─────────────────────────────────────── */
+
 .cta-card {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
   gap: 18px;
   align-items: center;
   margin-top: 20px;
+  background: var(--color-surface-neutral-200);
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 12px;
+  padding: 22px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
+
+.cta-card p {
+  margin-bottom: 0;
+  color: var(--color-text-neutral-secondary);
+}
+
+/* ── Buttons ──────────────────────────────────────── */
 
 .primary-button {
   width: 100%;
-  border: none;
   border-radius: 8px;
-  padding: 16px 18px;
+  padding: 14px 18px;
   font-size: var(--text-action-button-lg);
   line-height: var(--text-action-button-lg--line-height);
+  letter-spacing: var(--text-action-button-lg--letter-spacing);
   font-weight: var(--text-action-button-lg--font-weight);
   color: var(--color-text-neutral-complementary-base);
   background: var(--color-actions-primary-idle);
-  border: 1px solid var(--color-actions-primary-idle);
+  border: 1px solid transparent;
   cursor: pointer;
-  box-shadow: none;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
 }
 
 .primary-button:hover:not(:disabled) {
   background: var(--color-actions-primary-idle-alpha-strong);
-  border-color: var(--color-actions-primary-idle-alpha-strong);
+  box-shadow: 0 0 0 1px var(--color-actions-primary-idle);
+}
+
+.primary-button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .primary-button:disabled {
   color: var(--color-text-neutral-tertiary);
   background: var(--color-surface-neutral-300);
   border: 1px solid var(--color-borders-neutral-light);
-  opacity: 1;
   cursor: not-allowed;
-  box-shadow: none;
 }
+
+/* ── Progress ─────────────────────────────────────── */
 
 .progress-panel {
   border-color: var(--color-borders-primary-light);
@@ -1039,12 +1073,13 @@ async function submitRegistration() {
   font-size: var(--text-title-lg);
   line-height: var(--text-title-lg--line-height);
   color: var(--color-text-primary-base);
+  font-variant-numeric: tabular-nums;
 }
 
 .progress-track {
-  height: 14px;
+  height: 8px;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 99px;
   background: var(--color-surface-neutral-300);
 }
 
@@ -1052,18 +1087,23 @@ async function submitRegistration() {
   height: 100%;
   min-width: 8px;
   border-radius: inherit;
-  background: var(--color-actions-primary-idle);
-  transition: width 0.4s ease;
+  background: linear-gradient(90deg, var(--color-actions-primary-idle) 0%, #7ba2fe 100%);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* ── Confirmation card ────────────────────────────── */
 
 .confirmation-card {
   display: flex;
   gap: 16px;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 18px;
-  border-color: var(--color-borders-success-light);
+  margin-bottom: 20px;
+  padding: 20px 24px;
+  border-radius: 12px;
+  border: 1px solid var(--color-borders-success-light);
   background: var(--color-surface-success-300);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .confirmation-card.failed {
@@ -1074,43 +1114,46 @@ async function submitRegistration() {
 .confirmation-icon {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 8px;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
   background: var(--color-actions-success-idle);
   color: var(--color-text-neutral-complementary-base);
-  font-size: var(--text-title-md);
-  line-height: var(--text-title-md--line-height);
-  font-weight: var(--text-title-md--font-weight);
+  flex-shrink: 0;
 }
 
 .confirmation-card.failed .confirmation-icon {
   background: var(--color-actions-danger-idle);
 }
 
+/* ── New batch button ─────────────────────────────── */
+
 .new-batch-button {
   flex: 0 0 auto;
   border: 1px solid var(--color-borders-neutral-default);
   border-radius: 8px;
-  padding: 12px 16px;
+  padding: 10px 16px;
   color: var(--color-text-neutral-base);
-  background: var(--color-surface-neutral-100);
+  background: transparent;
   font-size: var(--text-action-button-md);
   line-height: var(--text-action-button-md--line-height);
   font-weight: var(--text-action-button-md--font-weight);
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .new-batch-button:hover {
   background: var(--color-actions-neutral-hover-overlay);
+  border-color: var(--color-borders-neutral-strong);
 }
 
 .results-header {
   margin-bottom: 14px;
 }
 
+/* ── Responsive ───────────────────────────────────── */
+
 @media (max-width: 860px) {
-  .hero,
   .workflow-grid,
   .cta-card {
     grid-template-columns: 1fr;
@@ -1119,7 +1162,11 @@ async function submitRegistration() {
 
 @media (max-width: 720px) {
   .page-shell {
-    padding: 20px 12px 36px;
+    padding: 24px 16px 40px;
+  }
+
+  .hero h1 {
+    font-size: 32px;
   }
 
   .panel,

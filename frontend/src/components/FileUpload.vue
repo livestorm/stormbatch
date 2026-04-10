@@ -71,7 +71,15 @@ function onDrop(event) {
           }
         "
       />
-      <span class="file-icon">FILE</span>
+      <span class="file-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+          <polyline points="10 9 9 9 8 9"/>
+        </svg>
+      </span>
       <strong>{{ selectedFile ? selectedFile.name : "Choose an .xlsx or .csv file" }}</strong>
       <small>
         {{
@@ -105,10 +113,11 @@ function onDrop(event) {
   background: var(--color-actions-primary-idle-alpha-light);
   border: 1px solid var(--color-borders-primary-light);
   border-radius: 6px;
-  padding: 4px 9px;
+  padding: 4px 10px;
   font-size: var(--text-content-legends-bold-md);
   line-height: var(--text-content-legends-bold-md--line-height);
   font-weight: var(--text-content-legends-bold-md--font-weight);
+  letter-spacing: 0.04em;
 }
 
 .upload-copy strong {
@@ -122,37 +131,40 @@ function onDrop(event) {
 .upload-copy p {
   margin: 6px 0 0;
   color: var(--color-text-neutral-secondary);
-  line-height: 1.55;
+  font-size: var(--text-content-text-regular-md);
+  line-height: 1.6;
 }
 
 .drop-zone {
   display: grid;
   place-items: center;
-  gap: 8px;
+  gap: 10px;
   min-height: 190px;
-  padding: 24px;
+  padding: 28px 24px;
   text-align: center;
   border: 2px dashed var(--color-borders-neutral-light);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--color-surface-neutral-100);
   cursor: pointer;
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
 }
 
 .drop-zone:hover {
   border-color: var(--color-borders-primary-default);
+  background: var(--color-surface-primary-alpha-100);
   transform: translateY(-1px);
 }
 
 .drop-zone.dragging {
   border-color: var(--color-borders-primary-strong);
-  background: var(--color-surface-primary-100);
+  background: var(--color-surface-primary-alpha-200);
   transform: translateY(-2px) scale(1.01);
 }
 
 .drop-zone.selected {
   border-style: solid;
   border-color: var(--color-borders-primary-default);
+  background: var(--color-surface-primary-alpha-100);
 }
 
 .drop-zone input {
@@ -162,14 +174,11 @@ function onDrop(event) {
 .file-icon {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 8px;
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
   color: var(--color-text-neutral-complementary-base);
   background: var(--color-actions-primary-idle);
-  font-size: var(--text-content-legends-bold-md);
-  line-height: var(--text-content-legends-bold-md--line-height);
-  font-weight: var(--text-content-legends-bold-md--font-weight);
 }
 
 .drop-zone small {
@@ -181,15 +190,21 @@ function onDrop(event) {
   justify-content: center;
   align-items: center;
   gap: 10px;
-  border: 1px solid var(--color-actions-primary-idle);
+  border: 1px solid transparent;
   background: var(--color-actions-primary-idle);
   color: var(--color-text-neutral-complementary-base);
   border-radius: 8px;
-  padding: 14px 16px;
+  padding: 13px 16px;
   font-size: var(--text-action-button-md);
   line-height: var(--text-action-button-md--line-height);
   font-weight: var(--text-action-button-md--font-weight);
   cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: var(--color-actions-primary-idle-alpha-strong);
+  box-shadow: 0 0 0 1px var(--color-actions-primary-idle);
 }
 
 .secondary-button:disabled {

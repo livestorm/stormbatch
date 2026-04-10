@@ -57,7 +57,7 @@ defineProps({
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--color-borders-neutral-light);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--color-surface-neutral-100);
 }
 

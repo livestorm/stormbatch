@@ -44,6 +44,12 @@ input {
   background: var(--color-surface-neutral-100);
   font-size: var(--text-content-text-regular-lg);
   line-height: var(--text-content-text-regular-lg--line-height);
+  transition: border-color 0.15s ease;
+}
+
+input:focus {
+  border-color: var(--color-borders-primary-strong);
+  outline: none;
 }
 
 input::placeholder {

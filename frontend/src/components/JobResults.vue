@@ -37,7 +37,8 @@ function isAlreadyRegisteredMessage(message) {
   const normalized = String(message).toLowerCase();
   return normalized.includes("already been invited")
     || normalized.includes("already registered")
-    || normalized.includes("identity has already been taken");
+    || normalized.includes("has already been taken")
+    || normalized.includes("already been registered");
 }
 
 function displayError(task) {
@@ -188,8 +189,9 @@ function cardClass(job) {
 .job-card {
   border: 1px solid var(--color-borders-neutral-light);
   background: var(--color-surface-neutral-100);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 18px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
 .job-card.succeeded {
@@ -270,6 +272,7 @@ h3 {
   background: var(--color-surface-neutral-100);
   border: 1px solid var(--color-borders-neutral-light);
   border-radius: 8px;
+  transition: border-color 0.15s ease;
 }
 
 .failed-row p,
@@ -289,15 +292,21 @@ h3 {
 }
 
 .retry-button {
-  border: none;
+  border: 1px solid transparent;
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 9px 14px;
   color: var(--color-text-neutral-complementary-base);
   background: var(--color-actions-primary-idle);
   font-size: var(--text-action-button-md);
   line-height: var(--text-action-button-md--line-height);
   font-weight: var(--text-action-button-md--font-weight);
   cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.retry-button:hover:not(:disabled) {
+  background: var(--color-actions-primary-idle-alpha-strong);
+  box-shadow: 0 0 0 1px var(--color-actions-primary-idle);
 }
 
 .retry-button:disabled {
