@@ -39,3 +39,16 @@ Open `http://localhost:5173`.
 - The frontend polls `/api/job-status` every 2.5 seconds after the jobs are created.
 - Job polling uses Livestorm's documented endpoints: `GET /v1/jobs/{id}` and `GET /v1/jobs/{id}/tasks`.
 - Email is the only mandatory field for Livestorm API registrations. Extra mapped fields are optional prefill data; attendees can complete other required event fields later before joining.
+
+## Deploy on Render
+
+StormBatch can run as one Docker Web Service. The Docker image builds the Vue app, copies the static files into the runtime image, and serves both the frontend and FastAPI API from one process.
+
+Use the included `render.yaml` Blueprint or create a Render Web Service manually with:
+
+```bash
+Dockerfile path: ./Dockerfile
+Health check path: /health
+```
+
+Render provides the `PORT` environment variable automatically.

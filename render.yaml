@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: stormbatch
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
