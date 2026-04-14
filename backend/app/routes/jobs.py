@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.schemas.jobs import (
     JobStatusRequest,
@@ -13,9 +13,12 @@ router = APIRouter(tags=["jobs"])
 
 
 @router.post("/job-status", response_model=JobStatusResponse)
-async def job_status(payload: JobStatusRequest) -> JobStatusResponse:
+async def job_status(request: Request, payload: JobStatusRequest) -> JobStatusResponse:
+    token = request.session.get("livestorm_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
     try:
-        async with LivestormClient(api_key=payload.api_key.strip()) as client:
+        async with LivestormClient(token=token, use_bearer=True) as client:
             status_response = await client.get_job_status(
                 session_id=payload.session_id,
                 job_id=payload.job_id,
@@ -28,10 +31,13 @@ async def job_status(payload: JobStatusRequest) -> JobStatusResponse:
 
 
 @router.post("/retry-failed", response_model=RetryFailedRowsResponse)
-async def retry_failed_rows(payload: RetryFailedRowsRequest) -> RetryFailedRowsResponse:
+async def retry_failed_rows(request: Request, payload: RetryFailedRowsRequest) -> RetryFailedRowsResponse:
+    token = request.session.get("livestorm_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
     try:
         results = []
-        async with LivestormClient(api_key=payload.api_key.strip()) as client:
+        async with LivestormClient(token=token, use_bearer=True) as client:
             for registrant in payload.registrants:
                 existing_people = await client.list_session_people(
                     session_id=payload.session_id,

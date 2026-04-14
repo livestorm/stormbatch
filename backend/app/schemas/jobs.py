@@ -4,7 +4,6 @@ from pydantic import BaseModel, Field
 
 
 class JobStatusRequest(BaseModel):
-    api_key: str
     session_id: str
     job_id: str
 
@@ -16,7 +15,6 @@ class RetryRegistrant(BaseModel):
 
 
 class RetryFailedRowsRequest(BaseModel):
-    api_key: str
     session_id: str
     registrants: list[RetryRegistrant]
 

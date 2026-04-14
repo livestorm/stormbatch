@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import ApiKeyInput from "./components/ApiKeyInput.vue";
 import FileUpload from "./components/FileUpload.vue";
 import JobResults from "./components/JobResults.vue";
@@ -10,7 +10,40 @@ import livestormIcon from "../assets/Icon-Livestorm-Tertiary-Light.png";
 const BULK_JOB_CHUNK_SIZE = 50;
 const JOB_STATUS_POLL_INTERVAL_MS = 5000;
 
-const apiKey = ref("");
+const isAuthenticated = ref(false);
+const isAuthLoading = ref(true);
+
+async function checkAuthStatus() {
+  try {
+    const res = await fetch("/api/auth/status");
+    const data = await res.json();
+    isAuthenticated.value = data.authenticated;
+  } catch {
+    isAuthenticated.value = false;
+  } finally {
+    isAuthLoading.value = false;
+  }
+}
+
+function handleLogin() {
+  window.location.href = "/api/auth/livestorm/login";
+}
+
+async function handleLogout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  isAuthenticated.value = false;
+}
+
+onMounted(() => {
+  const params = new URLSearchParams(window.location.search);
+  const authError = params.get("auth_error");
+  if (authError) {
+    errorMessage.value = `Livestorm connection failed: ${authError.replace(/_/g, " ")}.`;
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+  checkAuthStatus();
+});
+
 const sessionIds = ref("");
 const selectedFile = ref(null);
 const preview = ref(null);
@@ -329,7 +362,6 @@ async function pollJobUntilFinished(job) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        api_key: apiKey.value,
         session_id: job.session_id,
         job_id: job.job_id,
       }),
@@ -383,7 +415,6 @@ async function retryFailedRows(job) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        api_key: apiKey.value,
         session_id: job.session_id,
         registrants: failedRegistrants,
       }),
@@ -437,8 +468,8 @@ async function submitRegistration() {
     errorMessage.value = "Included columns cannot use the same Livestorm field ID twice.";
     return;
   }
-  if (!apiKey.value.trim()) {
-    errorMessage.value = "Livestorm API key is required.";
+  if (!isAuthenticated.value) {
+    errorMessage.value = "Please connect your Livestorm account first.";
     return;
   }
 
@@ -456,7 +487,6 @@ async function submitRegistration() {
       );
       for (let chunkIndex = 1; chunkIndex <= expectedChunksForSession; chunkIndex += 1) {
         const formData = new FormData();
-        formData.append("api_key", apiKey.value.trim());
         formData.append("session_ids", sessionId);
         formData.append("mapping", JSON.stringify(autoMapping.value));
         formData.append("chunk_index", String(chunkIndex));
@@ -540,7 +570,12 @@ async function submitRegistration() {
     <section class="workflow-grid">
       <div class="panel step-panel">
         <div class="step-label">Step 1</div>
-        <ApiKeyInput v-model="apiKey" />
+        <ApiKeyInput
+          :authenticated="isAuthenticated"
+          :loading="isAuthLoading"
+          @login="handleLogin"
+          @logout="handleLogout"
+        />
         <SessionIdsInput v-model="sessionIds" :count="parsedSessionIds.length" />
       </div>
       <div class="panel step-panel">

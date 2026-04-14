@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from app.schemas.registration import RegisterResponse
 from app.services.excel_parser import parse_excel_upload
@@ -26,13 +26,16 @@ def iter_chunks(items: list[dict], size: int) -> list[tuple[int, list[dict]]]:
 
 @router.post("/register", response_model=RegisterResponse)
 async def register_people(
-    api_key: str = Form(...),
+    request: Request,
     session_ids: str = Form(...),
     mapping: str = Form(...),
     file: UploadFile = File(...),
     chunk_index: Optional[int] = Form(None),
     chunk_size: int = Form(BULK_JOB_TASK_LIMIT),
 ) -> RegisterResponse:
+    token = request.session.get("livestorm_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
     try:
         parsed = await parse_excel_upload(file)
         mapping_dict = json.loads(mapping)
@@ -48,7 +51,7 @@ async def register_people(
             task_chunks = [task_chunks[chunk_index - 1]]
         total_job_count = len(session_id_list) * len(task_chunks)
 
-        async with LivestormClient(api_key=api_key.strip()) as client:
+        async with LivestormClient(token=token, use_bearer=True) as client:
             jobs = []
             created_job_count = 0
             for session_id in session_id_list:

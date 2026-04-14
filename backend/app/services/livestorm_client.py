@@ -13,15 +13,15 @@ class LivestormAPIError(Exception):
 class LivestormClient:
     BASE_URL = "https://api.livestorm.co"
 
-    def __init__(self, api_key: str) -> None:
-        if not api_key:
-            raise ValueError("Livestorm API key is required")
+    def __init__(self, token: str, use_bearer: bool = False) -> None:
+        if not token:
+            raise ValueError("Livestorm token is required")
+        # OAuth access tokens require a Bearer prefix; private API keys are sent as-is.
+        auth_header = f"Bearer {token}" if use_bearer else token
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             headers={
-                # Livestorm private API tokens are sent directly. OAuth tokens are
-                # the ones that require a Bearer prefix.
-                "Authorization": api_key,
+                "Authorization": auth_header,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
