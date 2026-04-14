@@ -32,6 +32,7 @@ function handleLogin() {
 async function handleLogout() {
   await fetch("/api/auth/logout", { method: "POST" });
   isAuthenticated.value = false;
+  startNewBatch();
 }
 
 onMounted(() => {
