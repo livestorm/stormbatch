@@ -29,9 +29,6 @@ defineEmits(["login", "logout"]);
     </div>
 
     <button v-else class="connect-btn" @click="$emit('login')">
-      <svg class="btn-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-        <path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm0 1.5a6.5 6.5 0 110 13 6.5 6.5 0 010-13zm.75 3.25a.75.75 0 00-1.5 0v3.19L7.22 11.97a.75.75 0 101.06 1.06l2.25-2.25a.75.75 0 00.22-.53V6.75z" fill="currentColor"/>
-      </svg>
       Connect with Livestorm
     </button>
   </div>
