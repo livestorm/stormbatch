@@ -1,6 +1,6 @@
 import os
 import secrets
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import APIRouter, Request
@@ -11,16 +11,17 @@ router = APIRouter(tags=["auth"])
 _CLIENT_ID = os.environ.get("LIVESTORM_OAUTH_CLIENT_ID", "")
 _CLIENT_SECRET = os.environ.get("LIVESTORM_OAUTH_CLIENT_SECRET", "")
 _REDIRECT_URI = os.environ.get("LIVESTORM_OAUTH_REDIRECT_URI", "")
-_SCOPES = os.environ.get("LIVESTORM_OAUTH_SCOPES", "event:read event:write")
+_SCOPES = os.environ.get("LIVESTORM_OAUTH_SCOPES", "events:read events:write")
 
 _AUTHORIZE_URL = "https://app.livestorm.co/oauth/authorize"
-_TOKEN_URL = "https://api.livestorm.co/v1/oauth/token"
+_TOKEN_URL = "https://app.livestorm.co/oauth/token"
 
 
 @router.get("/auth/livestorm/login")
 async def login(request: Request) -> RedirectResponse:
     state = secrets.token_urlsafe(32)
     request.session["oauth_state"] = state
+    # Use quote (not quote_plus) so spaces encode as %20, not +, per OAuth spec.
     params = urlencode(
         {
             "client_id": _CLIENT_ID,
@@ -28,7 +29,8 @@ async def login(request: Request) -> RedirectResponse:
             "response_type": "code",
             "scope": _SCOPES,
             "state": state,
-        }
+        },
+        quote_via=quote,
     )
     return RedirectResponse(f"{_AUTHORIZE_URL}?{params}")
 
