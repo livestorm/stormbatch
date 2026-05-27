@@ -59,4 +59,9 @@ if FRONTEND_DIST.exists() and FRONTEND_ASSETS.exists():
         requested_file = FRONTEND_DIST / full_path
         if full_path and requested_file.is_file():
             return FileResponse(requested_file)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        # index.html must never be cached so browsers always fetch the latest
+        # version after a deploy (hashed assets can still cache indefinitely).
+        return FileResponse(
+            FRONTEND_DIST / "index.html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
