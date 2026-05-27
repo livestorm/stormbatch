@@ -774,14 +774,6 @@ function startNewBatch() {
     <div class="app-bar-auth">
       <span v-if="isAuthLoading" class="auth-status-text">Connecting…</span>
       <template v-else-if="isAuthenticated">
-        <div class="user-badge">
-          <div class="user-avatar">
-            <img v-if="userProfile?.avatar_link" :src="userProfile.avatar_link" :alt="userName" class="user-avatar-img" />
-            <span v-else-if="userInitials" class="user-initials">{{ userInitials }}</span>
-            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          </div>
-          <span v-if="userName" class="user-name">{{ userName }}</span>
-        </div>
         <button class="bar-btn" type="button" @click="handleLogout">Disconnect</button>
       </template>
     </div>
@@ -2005,13 +1997,13 @@ body {
 
 .source-panel,
 .target-panel {
-  max-width: 680px;
+  max-width: 780px;
   margin-left: auto;
   margin-right: auto;
 }
 
 .centered-notice {
-  max-width: 680px;
+  max-width: 780px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -2019,7 +2011,7 @@ body {
 /* ── Step navigation buttons ──────────────────────── */
 
 .step-nav {
-  max-width: 680px;
+  max-width: 780px;
   margin: 4px auto 0;
   display: flex;
   justify-content: flex-end;
