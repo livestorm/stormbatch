@@ -22,12 +22,14 @@ const userProfile = ref(null);
 
 const userInitials = computed(() => {
   const p = userProfile.value;
-  if (!p) return "?";
-  if (p.first_name && p.last_name)
-    return (p.first_name[0] + p.last_name[0]).toUpperCase();
-  if (p.first_name) return p.first_name[0].toUpperCase();
-  if (p.email) return p.email[0].toUpperCase();
-  return "?";
+  if (!p) return "";
+  const first = (p.first_name || "").trim();
+  const last = (p.last_name || "").trim();
+  const email = (p.email || "").trim();
+  if (first && last) return (first[0] + last[0]).toUpperCase();
+  if (first) return first[0].toUpperCase();
+  if (email) return email[0].toUpperCase();
+  return "";
 });
 
 const userName = computed(() => {
@@ -42,7 +44,7 @@ async function checkAuthStatus() {
     const res = await fetch("/api/auth/status");
     const data = await res.json();
     isAuthenticated.value = data.authenticated;
-    if (data.authenticated) fetchUserProfile();
+    if (data.authenticated) { fetchUserProfile(); currentStep.value = 2; }
   } catch {
     isAuthenticated.value = false;
   } finally {
@@ -66,6 +68,7 @@ async function handleLogout() {
   isAuthenticated.value = false;
   userProfile.value = null;
   startNewBatch();
+  currentStep.value = 1;
 }
 
 onMounted(() => {
@@ -134,6 +137,21 @@ const createdSessionCount = ref(0);
 // ── Computed ───────────────────────────────────────────────────────────────────
 
 const parsedSessionIds = computed(() => sessionIds.value);
+
+// ── Step navigation ────────────────────────────────────────────────────────────
+
+const currentStep = ref(1); // 1 = Connect, 2 = Source, 3 = Target
+
+const sourceReady = computed(() =>
+  sourceMode.value === "upload" ? Boolean(preview.value) : Boolean(transferData.value),
+);
+
+function goToStep(step) {
+  if (step === 1) return;
+  if (!isAuthenticated.value) return;
+  if (step === 3 && !sourceReady.value) return;
+  currentStep.value = step;
+}
 
 // Upload mode
 const emailColumn = computed(() => {
@@ -738,6 +756,7 @@ function startNewBatch() {
   isSubmitting.value = false;
   isPreviewLoading.value = false;
   resetMessages();
+  currentStep.value = 2;
 }
 </script>
 
@@ -758,7 +777,8 @@ function startNewBatch() {
         <div class="user-badge">
           <div class="user-avatar">
             <img v-if="userProfile?.avatar_link" :src="userProfile.avatar_link" :alt="userName" class="user-avatar-img" />
-            <span v-else class="user-initials">{{ userInitials }}</span>
+            <span v-else-if="userInitials" class="user-initials">{{ userInitials }}</span>
+            <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           </div>
           <span v-if="userName" class="user-name">{{ userName }}</span>
         </div>
@@ -769,10 +789,10 @@ function startNewBatch() {
 
   <main class="page-shell">
 
-    <!-- ── Step track ────────────────────────────────────────────────────────── -->
+    <!-- ── Step track (navigation) ──────────────────────────────────────────── -->
 
     <div class="step-track">
-      <div class="step-item" :class="{ active: !isAuthenticated && !isAuthLoading, done: isAuthenticated }">
+      <div class="step-item" :class="{ active: currentStep === 1, done: isAuthenticated }">
         <div class="step-circ">
           <svg v-if="isAuthenticated" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
           <span v-else>1</span>
@@ -780,24 +800,31 @@ function startNewBatch() {
         <span class="step-lbl">Connect</span>
       </div>
       <div class="step-conn" :class="{ done: isAuthenticated }"></div>
-      <div class="step-item" :class="{ active: isAuthenticated && !(sourceMode === 'upload' ? preview : transferData), done: Boolean(sourceMode === 'upload' ? preview : transferData), locked: !isAuthenticated }">
+      <div
+        class="step-item"
+        :class="{ active: currentStep === 2, done: currentStep === 3, locked: !isAuthenticated, 'can-navigate': isAuthenticated }"
+        @click="goToStep(2)"
+      >
         <div class="step-circ">
-          <svg v-if="sourceMode === 'upload' ? preview : transferData" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          <svg v-if="currentStep === 3" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
           <span v-else>2</span>
         </div>
         <span class="step-lbl">Source</span>
       </div>
-      <div class="step-conn" :class="{ done: parsedSessionIds.length > 0 }"></div>
-      <div class="step-item" :class="{ active: Boolean(sourceMode === 'upload' ? preview : transferData) && parsedSessionIds.length === 0, done: parsedSessionIds.length > 0, locked: !isAuthenticated }">
+      <div class="step-conn" :class="{ done: currentStep === 3 }"></div>
+      <div
+        class="step-item"
+        :class="{ active: currentStep === 3, locked: !isAuthenticated || !sourceReady, 'can-navigate': isAuthenticated && sourceReady }"
+        @click="goToStep(3)"
+      >
         <div class="step-circ">
-          <svg v-if="parsedSessionIds.length > 0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-          <span v-else>3</span>
+          <span>3</span>
         </div>
         <span class="step-lbl">Target</span>
       </div>
     </div>
 
-    <!-- ── Onboarding (not connected) ──────────────────────────────────────── -->
+    <!-- ── Step 1: Onboarding (not connected) ────────────────────────────────── -->
 
     <div v-if="!isAuthenticated && !isAuthLoading" class="onboarding-state">
       <div class="onboarding-card">
@@ -832,29 +859,16 @@ function startNewBatch() {
       </div>
     </div>
 
-    <!-- ── Authenticated content ──────────────────────────────────────────── -->
+    <!-- ── Step 2: Source ─────────────────────────────────────────────────────── -->
 
-    <template v-else-if="isAuthenticated">
+    <template v-else-if="isAuthenticated && currentStep === 2">
 
-      <!-- Source card -->
       <div class="panel source-panel">
         <h2 class="step-heading">Choose source</h2>
 
         <div class="mode-toggle" role="group" aria-label="Source type">
-          <button
-            :class="['mode-btn', { active: sourceMode === 'upload' }]"
-            type="button"
-            @click="setSourceMode('upload')"
-          >
-            Upload file
-          </button>
-          <button
-            :class="['mode-btn', { active: sourceMode === 'transfer' }]"
-            type="button"
-            @click="setSourceMode('transfer')"
-          >
-            Transfer from session
-          </button>
+          <button :class="['mode-btn', { active: sourceMode === 'upload' }]" type="button" @click="setSourceMode('upload')">Upload file</button>
+          <button :class="['mode-btn', { active: sourceMode === 'transfer' }]" type="button" @click="setSourceMode('transfer')">Transfer from session</button>
         </div>
 
         <FileUpload
@@ -865,7 +879,6 @@ function startNewBatch() {
           @file-selected="onFileSelected"
           @preview="loadPreview"
         />
-
         <SourceSessionInput
           v-else
           v-model="sourceSessionId"
@@ -875,8 +888,9 @@ function startNewBatch() {
         />
       </div>
 
-      <!-- ── Upload mode: column preview + mapping -->
+      <section v-if="errorMessage" class="notice error centered-notice">{{ errorMessage }}</section>
 
+      <!-- Upload: column mapping + preview table -->
       <section v-if="sourceMode === 'upload' && preview" class="panel preview-panel">
         <div class="panel-header">
           <div>
@@ -893,44 +907,26 @@ function startNewBatch() {
             </div>
           </div>
         </div>
-
         <div class="attribute-preview">
-          <div
-            v-for="(item, index) in mappedAttributePreview"
-            :key="item.column"
-            class="column-card"
-            :class="{ included: item.include }"
-          >
+          <div v-for="(item, index) in mappedAttributePreview" :key="item.column" class="column-card" :class="{ included: item.include }">
             <div>
               <strong>{{ item.column }}</strong>
               <span>{{ item.required ? "Required email field" : "Optional field" }}</span>
             </div>
             <div class="column-actions">
               <label class="include-toggle" :class="{ disabled: item.required }">
-                <input
-                  type="checkbox"
-                  :checked="item.include"
-                  :disabled="item.required"
-                  @change="updateColumnSetting(index, { include: $event.target.checked })"
-                />
+                <input type="checkbox" :checked="item.include" :disabled="item.required" @change="updateColumnSetting(index, { include: $event.target.checked })" />
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
               </label>
               <strong class="toggle-label">{{ item.include ? "Send" : "Drop" }}</strong>
             </div>
-            <input
-              :value="item.attributeId"
-              :disabled="!item.include || item.required"
-              placeholder="Livestorm field ID"
-              @input="updateColumnSetting(index, { attributeId: $event.target.value })"
-            />
+            <input :value="item.attributeId" :disabled="!item.include || item.required" placeholder="Livestorm field ID" @input="updateColumnSetting(index, { attributeId: $event.target.value })" />
           </div>
         </div>
-
         <PreviewTable :headers="preview.headers" :rows="preview.preview_rows" />
       </section>
 
-      <!-- ── Transfer mode: registrant editor -->
-
+      <!-- Transfer: registrant editor -->
       <section v-if="sourceMode === 'transfer' && transferData" class="panel preview-panel">
         <div class="panel-header">
           <div>
@@ -939,46 +935,28 @@ function startNewBatch() {
             <p class="source-session-id">from session {{ transferData.session_id }}</p>
           </div>
           <div class="preview-statuses">
-            <div class="status-pill ok">
-              {{ transferActiveRows.length }} included
-            </div>
-            <div v-if="transferExcludedCount" class="status-pill error">
-              {{ transferExcludedCount }} removed
-            </div>
+            <div class="status-pill ok">{{ transferActiveRows.length }} included</div>
+            <div v-if="transferExcludedCount" class="status-pill error">{{ transferExcludedCount }} removed</div>
           </div>
         </div>
-
         <div class="field-toggles-section">
           <span class="field-toggles-label">Columns to transfer</span>
           <div class="attribute-preview">
-            <div
-              v-for="field in transferData.headers"
-              :key="field"
-              class="column-card"
-              :class="{ included: transferIncludedFields.includes(field) }"
-            >
+            <div v-for="field in transferData.headers" :key="field" class="column-card" :class="{ included: transferIncludedFields.includes(field) }">
               <div>
                 <strong>{{ field }}</strong>
                 <span>{{ field === 'email' ? 'Required' : 'Optional' }}</span>
               </div>
               <div class="column-actions">
                 <label class="include-toggle" :class="{ disabled: field === 'email' }">
-                  <input
-                    type="checkbox"
-                    :checked="transferIncludedFields.includes(field)"
-                    :disabled="field === 'email'"
-                    @change="toggleTransferField(field)"
-                  />
+                  <input type="checkbox" :checked="transferIncludedFields.includes(field)" :disabled="field === 'email'" @change="toggleTransferField(field)" />
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
                 </label>
-                <strong class="toggle-label">
-                  {{ transferIncludedFields.includes(field) ? "Send" : "Drop" }}
-                </strong>
+                <strong class="toggle-label">{{ transferIncludedFields.includes(field) ? "Send" : "Drop" }}</strong>
               </div>
             </div>
           </div>
         </div>
-
         <div class="registrant-table-wrap">
           <table class="registrant-table">
             <thead>
@@ -988,82 +966,59 @@ function startNewBatch() {
               </tr>
             </thead>
             <tbody>
-              <tr
-                v-for="(row, index) in transferData.rows"
-                :key="index"
-                :class="{ 'row-removed': transferExcludedRows[index] }"
-              >
+              <tr v-for="(row, index) in transferData.rows" :key="index" :class="{ 'row-removed': transferExcludedRows[index] }">
                 <td class="action-td">
-                  <button
-                    v-if="!transferExcludedRows[index]"
-                    class="row-action-btn remove"
-                    type="button"
-                    title="Remove this registrant"
-                    @click="removeTransferRow(index)"
-                  >✕</button>
-                  <button
-                    v-else
-                    class="row-action-btn restore"
-                    type="button"
-                    title="Restore this registrant"
-                    @click="restoreTransferRow(index)"
-                  >↩</button>
+                  <button v-if="!transferExcludedRows[index]" class="row-action-btn remove" type="button" title="Remove this registrant" @click="removeTransferRow(index)">✕</button>
+                  <button v-else class="row-action-btn restore" type="button" title="Restore this registrant" @click="restoreTransferRow(index)">↩</button>
                 </td>
-                <td v-for="field in transferIncludedFields" :key="field">
-                  {{ row[field] || "" }}
-                </td>
+                <td v-for="field in transferIncludedFields" :key="field">{{ row[field] || "" }}</td>
               </tr>
             </tbody>
           </table>
         </div>
       </section>
 
-      <!-- ── Target sessions card (appears when source is ready) ──────────── -->
+      <!-- Next button -->
+      <div v-if="sourceReady" class="step-nav">
+        <button class="primary-button step-next-btn" type="button" @click="goToStep(3)">
+          Next: Set target sessions →
+        </button>
+      </div>
 
-      <Transition name="slide-up">
-        <div
-          v-if="sourceMode === 'upload' ? Boolean(preview) : Boolean(transferData)"
-          class="panel target-panel"
-        >
-          <h2 class="step-heading">Target sessions</h2>
-          <SessionIdsInput v-model="sessionIds" />
-        </div>
-      </Transition>
+    </template>
 
-      <!-- ── Notices -->
+    <!-- ── Step 3: Target ─────────────────────────────────────────────────────── -->
 
-      <section v-if="errorMessage" class="notice error">{{ errorMessage }}</section>
-      <section v-if="successMessage" class="notice success">{{ successMessage }}</section>
+    <template v-else-if="isAuthenticated && currentStep === 3">
 
-      <!-- ── Submit CTA -->
+      <button class="back-btn" type="button" @click="goToStep(2)">
+        ← Back to source
+      </button>
+
+      <div class="panel target-panel">
+        <h2 class="step-heading">Target sessions</h2>
+        <SessionIdsInput v-model="sessionIds" />
+      </div>
+
+      <section v-if="errorMessage" class="notice error centered-notice">{{ errorMessage }}</section>
+      <section v-if="successMessage" class="notice success centered-notice">{{ successMessage }}</section>
 
       <section v-if="isReadyToSubmit" class="cta-card">
         <div>
           <h2>Ready to register?</h2>
           <p v-if="sourceMode === 'upload'">
-            This will create {{ expectedJobCount }} Livestorm job(s) in batches of
-            {{ BULK_JOB_CHUNK_SIZE }} registrants or fewer.
+            This will create {{ expectedJobCount }} Livestorm job(s) in batches of {{ BULK_JOB_CHUNK_SIZE }} registrants or fewer.
           </p>
           <p v-else>
-            {{ transferActiveRows.length }} registrant(s) will be transferred to
-            {{ parsedSessionIds.length }} session(s) in batches of
-            {{ BULK_JOB_CHUNK_SIZE }}.
+            {{ transferActiveRows.length }} registrant(s) will be transferred to {{ parsedSessionIds.length }} session(s) in batches of {{ BULK_JOB_CHUNK_SIZE }}.
           </p>
         </div>
         <div class="cta-actions">
-          <button
-            class="primary-button"
-            :disabled="isSubmitting || isPollingJobs"
-            @click="handleSubmit"
-          >
-            {{ isSubmitting
-              ? (sourceMode === "transfer" ? "Transferring…" : "Creating jobs…")
-              : (sourceMode === "transfer" ? "Transfer now" : "Batch register now") }}
+          <button class="primary-button" :disabled="isSubmitting || isPollingJobs" @click="handleSubmit">
+            {{ isSubmitting ? (sourceMode === "transfer" ? "Transferring…" : "Creating jobs…") : (sourceMode === "transfer" ? "Transfer now" : "Batch register now") }}
           </button>
         </div>
       </section>
-
-      <!-- ── Progress -->
 
       <section v-if="jobs.length || isSubmitting" class="panel progress-panel">
         <div class="panel-header">
@@ -1079,32 +1034,17 @@ function startNewBatch() {
         </div>
       </section>
 
-      <!-- ── Completion card -->
-
-      <section
-        v-if="hasSubmittedJobs && !isPollingJobs && jobs.length"
-        class="confirmation-card"
-        :class="{ failed: registrationSummary.failedJobs }"
-      >
+      <section v-if="hasSubmittedJobs && !isPollingJobs && jobs.length" class="confirmation-card" :class="{ failed: registrationSummary.failedJobs }">
         <div class="confirmation-icon">
-          <svg v-if="!registrationSummary.failedJobs" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <line x1="12" y1="8" x2="12" y2="13"/>
-            <line x1="12" y1="17" x2="12.01" y2="17"/>
-          </svg>
+          <svg v-if="!registrationSummary.failedJobs" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         </div>
         <div>
           <h2>{{ completionTitle }}</h2>
           <p>{{ completionMessage }}</p>
         </div>
-        <button class="new-batch-button" type="button" @click="startNewBatch">
-          New Batch
-        </button>
+        <button class="new-batch-button" type="button" @click="startNewBatch">New Batch</button>
       </section>
-
-      <!-- ── Results -->
 
       <section v-if="visibleResultJobs.length" class="panel">
         <div class="panel-header results-header">
@@ -1113,11 +1053,7 @@ function startNewBatch() {
             <h2>Rows needing attention</h2>
           </div>
         </div>
-        <JobResults
-          :jobs="visibleResultJobs"
-          :retrying-sessions="retryingSessions"
-          @retry-failed="retryFailedRows"
-        />
+        <JobResults :jobs="visibleResultJobs" :retrying-sessions="retryingSessions" @retry-failed="retryFailedRows" />
       </section>
 
     </template>
@@ -2067,12 +2003,60 @@ body {
 
 /* ── Source / target panel variants ──────────────── */
 
-.source-panel {
-  max-width: 680px;
-}
-
+.source-panel,
 .target-panel {
   max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.centered-notice {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ── Step navigation buttons ──────────────────────── */
+
+.step-nav {
+  max-width: 680px;
+  margin: 4px auto 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.step-next-btn {
+  width: auto !important;
+  padding: 12px 28px !important;
+}
+
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  margin-bottom: 12px;
+  background: none;
+  border: none;
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-text-regular-md, 14px);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.back-btn:hover {
+  color: var(--color-text-neutral-base);
+}
+
+/* ── Navigable step items ─────────────────────────── */
+
+.step-item.can-navigate {
+  cursor: pointer;
+}
+
+.step-item.can-navigate:hover:not(.active):not(.locked) .step-circ {
+  border-color: var(--color-actions-primary-idle);
+  color: var(--color-actions-primary-idle);
 }
 
 /* ── App bar beta chip ────────────────────────────── */

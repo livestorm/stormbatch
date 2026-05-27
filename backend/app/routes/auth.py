@@ -77,8 +77,10 @@ async def auth_status(request: Request) -> dict:
 
 @router.get("/auth/me")
 async def current_user_profile(request: Request) -> JSONResponse:
+    import logging
     from app.services.livestorm_client import LivestormClient
 
+    logger = logging.getLogger(__name__)
     token = request.session.get("livestorm_token")
     if not token:
         return JSONResponse({"error": "not_authenticated"}, status_code=401)
@@ -86,16 +88,21 @@ async def current_user_profile(request: Request) -> JSONResponse:
     try:
         async with LivestormClient(token=token, use_bearer=True) as client:
             resp = await client._request("GET", "/v1/me")
+            logger.info("GET /v1/me → %s", resp.status_code)
             if resp.status_code == 200:
-                attrs = resp.json().get("data", {}).get("attributes", {})
+                body = resp.json()
+                attrs = body.get("data", {}).get("attributes", {})
+                # Livestorm may return camelCase or snake_case depending on token type
                 return JSONResponse({
                     "email": attrs.get("email") or "",
-                    "first_name": attrs.get("first_name") or "",
-                    "last_name": attrs.get("last_name") or "",
-                    "avatar_link": attrs.get("avatar_link") or None,
+                    "first_name": attrs.get("first_name") or attrs.get("firstName") or "",
+                    "last_name": attrs.get("last_name") or attrs.get("lastName") or "",
+                    "avatar_link": attrs.get("avatar_link") or attrs.get("avatarLink") or None,
                 })
-    except Exception:
-        pass
+            else:
+                logger.warning("GET /v1/me failed: %s %s", resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.exception("Error fetching Livestorm user profile: %s", exc)
 
     return JSONResponse({"email": "", "first_name": "", "last_name": "", "avatar_link": None})
 
