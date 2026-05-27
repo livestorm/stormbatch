@@ -64,14 +64,15 @@ defineEmits(["update:modelValue", "fetch"]);
 }
 
 .source-input-row input {
+  box-sizing: border-box;
   width: 100%;
   border: 1px solid var(--color-borders-neutral-light);
   border-radius: 8px;
   padding: 10px 12px;
   color: var(--color-text-neutral-base);
   background: var(--color-surface-neutral-100);
-  font-size: var(--text-content-text-regular-lg);
-  line-height: var(--text-content-text-regular-lg--line-height);
+  font-size: var(--text-content-text-regular-md, 14px);
+  line-height: 1.5;
   font-family: ui-monospace, "SFMono-Regular", monospace;
 }
 
