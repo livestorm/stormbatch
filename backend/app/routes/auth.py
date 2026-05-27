@@ -75,6 +75,31 @@ async def auth_status(request: Request) -> dict:
     return {"authenticated": bool(token)}
 
 
+@router.get("/auth/me")
+async def current_user_profile(request: Request) -> JSONResponse:
+    from app.services.livestorm_client import LivestormClient
+
+    token = request.session.get("livestorm_token")
+    if not token:
+        return JSONResponse({"error": "not_authenticated"}, status_code=401)
+
+    try:
+        async with LivestormClient(token=token, use_bearer=True) as client:
+            resp = await client._request("GET", "/v1/me")
+            if resp.status_code == 200:
+                attrs = resp.json().get("data", {}).get("attributes", {})
+                return JSONResponse({
+                    "email": attrs.get("email") or "",
+                    "first_name": attrs.get("first_name") or "",
+                    "last_name": attrs.get("last_name") or "",
+                    "avatar_link": attrs.get("avatar_link") or None,
+                })
+    except Exception:
+        pass
+
+    return JSONResponse({"email": "", "first_name": "", "last_name": "", "avatar_link": None})
+
+
 @router.post("/auth/logout")
 async def logout(request: Request) -> JSONResponse:
     request.session.pop("livestorm_token", None)

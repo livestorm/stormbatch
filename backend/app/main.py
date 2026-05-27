@@ -11,6 +11,7 @@ from app.routes.auth import router as auth_router
 from app.routes.jobs import router as jobs_router
 from app.routes.preview import router as preview_router
 from app.routes.registration import router as registration_router
+from app.routes.transfer import router as transfer_router
 
 _SESSION_SECRET = os.environ.get("SESSION_SECRET_KEY", "dev-secret-change-in-production")
 
@@ -35,6 +36,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(preview_router, prefix="/api")
 app.include_router(registration_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
+app.include_router(transfer_router, prefix="/api")
 
 
 @app.get("/health")

@@ -50,7 +50,7 @@ function displayError(task) {
 
 function rowLabel(task) {
   const row = task?.row_result || {};
-  return [row.email, `Excel row ${row.row_number || "?"}`].filter(Boolean).join(" - ");
+  return [row.email, `Row ${row.row_number || "?"}`].filter(Boolean).join(" — ");
 }
 
 function failedTasks(job) {

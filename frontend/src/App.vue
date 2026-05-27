@@ -1,28 +1,60 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import ApiKeyInput from "./components/ApiKeyInput.vue";
+import BetaInfoModal from "./components/BetaInfoModal.vue";
 import FileUpload from "./components/FileUpload.vue";
 import JobResults from "./components/JobResults.vue";
 import PreviewTable from "./components/PreviewTable.vue";
 import SessionIdsInput from "./components/SessionIdsInput.vue";
+import SourceSessionInput from "./components/SourceSessionInput.vue";
 import livestormIcon from "../assets/Icon-Livestorm-Tertiary-Light.png";
+
+const showBetaInfo = ref(false);
 
 const BULK_JOB_CHUNK_SIZE = 50;
 const JOB_STATUS_POLL_INTERVAL_MS = 5000;
 
+// ── Auth ───────────────────────────────────────────────────────────────────────
+
 const isAuthenticated = ref(false);
 const isAuthLoading = ref(true);
+const userProfile = ref(null);
+
+const userInitials = computed(() => {
+  const p = userProfile.value;
+  if (!p) return "?";
+  if (p.first_name && p.last_name)
+    return (p.first_name[0] + p.last_name[0]).toUpperCase();
+  if (p.first_name) return p.first_name[0].toUpperCase();
+  if (p.email) return p.email[0].toUpperCase();
+  return "?";
+});
+
+const userName = computed(() => {
+  const p = userProfile.value;
+  if (!p) return "";
+  const full = [p.first_name, p.last_name].filter(Boolean).join(" ");
+  return full || p.email || "";
+});
 
 async function checkAuthStatus() {
   try {
     const res = await fetch("/api/auth/status");
     const data = await res.json();
     isAuthenticated.value = data.authenticated;
+    if (data.authenticated) fetchUserProfile();
   } catch {
     isAuthenticated.value = false;
   } finally {
     isAuthLoading.value = false;
   }
+}
+
+async function fetchUserProfile() {
+  try {
+    const res = await fetch("/api/auth/me");
+    if (res.ok) userProfile.value = await res.json();
+  } catch { /* profile is optional — fail silently */ }
 }
 
 function handleLogin() {
@@ -32,6 +64,7 @@ function handleLogin() {
 async function handleLogout() {
   await fetch("/api/auth/logout", { method: "POST" });
   isAuthenticated.value = false;
+  userProfile.value = null;
   startNewBatch();
 }
 
@@ -45,15 +78,52 @@ onMounted(() => {
   checkAuthStatus();
 });
 
-const sessionIds = ref("");
+// ── Source mode ────────────────────────────────────────────────────────────────
+
+const sourceMode = ref("upload"); // "upload" | "transfer"
+
+function setSourceMode(mode) {
+  if (mode === sourceMode.value) return;
+  sourceMode.value = mode;
+  selectedFile.value = null;
+  preview.value = null;
+  columnSettings.value = [];
+  duplicateEmails.value = [];
+  sourceSessionId.value = "";
+  transferData.value = null;
+  transferExcludedRows.value = {};
+  transferIncludedFields.value = [];
+  isSourceLoading.value = false;
+  jobs.value = [];
+  hasSubmittedJobs.value = false;
+  rowResults.value = [];
+  totalSessionCount.value = 0;
+  createdSessionCount.value = 0;
+  resetMessages();
+}
+
+// ── Upload mode state ──────────────────────────────────────────────────────────
+
 const selectedFile = ref(null);
 const preview = ref(null);
 const columnSettings = ref([]);
-const jobs = ref([]);
 const duplicateEmails = ref([]);
+const isPreviewLoading = ref(false);
+
+// ── Transfer mode state ────────────────────────────────────────────────────────
+
+const sourceSessionId = ref("");
+const transferData = ref(null); // { session_id, headers, rows, total }
+const transferExcludedRows = ref({}); // { [rowIndex]: true }
+const transferIncludedFields = ref([]); // field IDs to send
+const isSourceLoading = ref(false);
+
+// ── Shared state ───────────────────────────────────────────────────────────────
+
+const sessionIds = ref([]);
+const jobs = ref([]);
 const errorMessage = ref("");
 const successMessage = ref("");
-const isPreviewLoading = ref(false);
 const isSubmitting = ref(false);
 const rowResults = ref([]);
 const hasSubmittedJobs = ref(false);
@@ -61,43 +131,81 @@ const retryingSessions = ref({});
 const totalSessionCount = ref(0);
 const createdSessionCount = ref(0);
 
-const parsedSessionIds = computed(() =>
-  sessionIds.value
-    .split(/[\n,]/)
-    .map((value) => value.trim())
-    .filter(Boolean),
-);
+// ── Computed ───────────────────────────────────────────────────────────────────
 
+const parsedSessionIds = computed(() => sessionIds.value);
+
+// Upload mode
 const emailColumn = computed(() => {
-  if (!preview.value) {
-    return "";
-  }
-  return preview.value.headers.find(
-    (header) => preview.value.normalized_headers[header] === "email",
-  ) || "";
+  if (!preview.value) return "";
+  return (
+    preview.value.headers.find(
+      (h) => preview.value.normalized_headers[h] === "email",
+    ) || ""
+  );
 });
 
 const hasEmailColumn = computed(() => Boolean(emailColumn.value));
 
-const autoMapping = computed(() => {
-  return Object.fromEntries(
+const autoMapping = computed(() =>
+  Object.fromEntries(
     columnSettings.value
-      .filter((column) => column.include)
-      .map((column) => [column.column, column.attributeId.trim()]),
+      .filter((c) => c.include)
+      .map((c) => [c.column, c.attributeId.trim()]),
+  ),
+);
+
+const mappedAttributePreview = computed(() =>
+  columnSettings.value.map((c) => ({ ...c, required: c.attributeId === "email" })),
+);
+
+// Transfer mode
+const transferActiveRows = computed(() => {
+  if (!transferData.value) return [];
+  return transferData.value.rows.filter((_, i) => !transferExcludedRows.value[i]);
+});
+
+const transferExcludedCount = computed(
+  () => Object.keys(transferExcludedRows.value).length,
+);
+
+// Shared / progress
+const expectedJobCount = computed(() => {
+  if (sourceMode.value === "transfer") {
+    if (!transferActiveRows.value.length || !parsedSessionIds.value.length) return 0;
+    return (
+      parsedSessionIds.value.length *
+      Math.max(1, Math.ceil(transferActiveRows.value.length / BULK_JOB_CHUNK_SIZE))
+    );
+  }
+  if (!preview.value || !parsedSessionIds.value.length) return parsedSessionIds.value.length;
+  return (
+    parsedSessionIds.value.length *
+    Math.max(1, Math.ceil(preview.value.row_count / BULK_JOB_CHUNK_SIZE))
   );
 });
 
-const mappedAttributePreview = computed(() =>
-  columnSettings.value.map((column) => ({
-    ...column,
-    required: column.attributeId === "email",
-  })),
-);
+const isReadyToSubmit = computed(() => {
+  if (!isAuthenticated.value || !parsedSessionIds.value.length) return false;
+  if (sourceMode.value === "upload") {
+    return (
+      Boolean(preview.value) &&
+      hasEmailColumn.value &&
+      Object.values(autoMapping.value).includes("email")
+    );
+  }
+  return (
+    Boolean(transferData.value) &&
+    transferIncludedFields.value.includes("email") &&
+    transferActiveRows.value.length > 0
+  );
+});
 
-const finishedJobs = computed(() =>
-  jobs.value.filter((job) =>
-    ["ended", "failed", "completed"].includes(String(job.status).toLowerCase()),
-  ).length,
+const finishedJobs = computed(
+  () =>
+    jobs.value.filter((j) =>
+      ["ended", "failed", "completed"].includes(String(j.status).toLowerCase()),
+    ).length,
 );
 
 function taskStatus(task) {
@@ -105,79 +213,63 @@ function taskStatus(task) {
 }
 
 function taskError(task) {
-  const attributes = task?.attributes || {};
-  const errors = attributes.errors || task?.errors;
+  const attrs = task?.attributes || {};
+  const errors = attrs.errors || task?.errors;
   if (Array.isArray(errors)) {
-    return errors
-      .map((error) => error.detail || error.title || error.message || String(error))
-      .join(", ");
+    return errors.map((e) => e.detail || e.title || e.message || String(e)).join(", ");
   }
-  return attributes.error || attributes.message || task?.error || task?.message || "";
+  return attrs.error || attrs.message || task?.error || task?.message || "";
 }
 
 function isAlreadyRegisteredMessage(message) {
-  const normalized = String(message).toLowerCase();
-  return normalized.includes("already been invited")
-    || normalized.includes("already registered")
-    || normalized.includes("has already been taken")
-    || normalized.includes("already been registered");
+  const n = String(message).toLowerCase();
+  return (
+    n.includes("already been invited") ||
+    n.includes("already registered") ||
+    n.includes("has already been taken") ||
+    n.includes("already been registered")
+  );
 }
 
 function failedJobTasks(job) {
   return (job.tasks || []).filter(
-    (task) => String(taskStatus(task)).toLowerCase() === "failed",
+    (t) => String(taskStatus(t)).toLowerCase() === "failed",
   );
 }
 
 function hasActionableFailure(job) {
   const status = String(job.status).toLowerCase();
-  const failedTasks = failedJobTasks(job);
-  if (failedTasks.length) {
-    return failedTasks.some((task) => !isAlreadyRegisteredMessage(taskError(task)));
-  }
+  const failed = failedJobTasks(job);
+  if (failed.length) return failed.some((t) => !isAlreadyRegisteredMessage(taskError(t)));
   return status === "failed";
 }
 
-const expectedJobCount = computed(() => {
-  if (!preview.value || !parsedSessionIds.value.length) {
-    return parsedSessionIds.value.length;
-  }
-  const chunksPerSession = Math.max(
-    1,
-    Math.ceil(preview.value.row_count / BULK_JOB_CHUNK_SIZE),
-  );
-  return parsedSessionIds.value.length * chunksPerSession;
-});
-
 const progressPercent = computed(() => {
   const total = totalSessionCount.value || jobs.value.length;
-  if (!total) {
-    return 0;
-  }
+  if (!total) return 0;
   return Math.min(100, Math.round((createdSessionCount.value / total) * 100));
 });
 
 const isPollingJobs = computed(() =>
   jobs.value.some(
-    (job) => !["ended", "failed", "completed"].includes(String(job.status).toLowerCase()),
+    (j) => !["ended", "failed", "completed"].includes(String(j.status).toLowerCase()),
   ),
 );
 
 const visibleResultJobs = computed(() =>
-  jobs.value.filter((job) => hasActionableFailure(job) || job.retry_results?.length),
+  jobs.value.filter((j) => hasActionableFailure(j) || j.retry_results?.length),
 );
 
 const registrationSummary = computed(() => {
-  const taskResults = jobs.value.flatMap((job) => job.tasks || []);
-  const failedTasks = taskResults.filter((task) => {
-    return String(taskStatus(task)).toLowerCase() === "failed";
+  const taskResults = jobs.value.flatMap((j) => j.tasks || []);
+  const failedTasks = taskResults.filter(
+    (t) => String(taskStatus(t)).toLowerCase() === "failed",
+  ).length;
+  const failedJobs = jobs.value.filter((j) => hasActionableFailure(j)).length;
+  const alreadyRegisteredOnlyJobs = jobs.value.filter((j) => {
+    const failed = failedJobTasks(j);
+    return failed.length > 0 && !hasActionableFailure(j);
   }).length;
-  const failedJobs = jobs.value.filter((job) => hasActionableFailure(job)).length;
-  const alreadyRegisteredOnlyJobs = jobs.value.filter((job) => {
-    const failed = failedJobTasks(job);
-    return failed.length > 0 && !hasActionableFailure(job);
-  }).length;
-
   return {
     jobs: totalSessionCount.value || jobs.value.length || (isSubmitting.value ? expectedJobCount.value : 0),
     created: createdSessionCount.value,
@@ -190,12 +282,8 @@ const registrationSummary = computed(() => {
 });
 
 const progressTitle = computed(() => {
-  if (isSubmitting.value) {
-    return "Registering...";
-  }
-  if (isPollingJobs.value) {
-    return "Checking results...";
-  }
+  if (isSubmitting.value) return sourceMode.value === "transfer" ? "Transferring…" : "Registering…";
+  if (isPollingJobs.value) return "Checking results…";
   return registrationSummary.value.failedJobs ? "Batch finished with failed jobs" : "Batch complete";
 });
 
@@ -203,11 +291,13 @@ const progressMessage = computed(() => {
   if (isSubmitting.value) {
     const total = totalSessionCount.value || expectedJobCount.value;
     const current = Math.min(createdSessionCount.value + 1, total);
-    return total ? `Processing batch ${current} of ${total}.` : "Sending registrants to Livestorm.";
+    return total
+      ? `Processing batch ${current} of ${total}.`
+      : sourceMode.value === "transfer"
+        ? "Transferring registrants to Livestorm."
+        : "Sending registrants to Livestorm.";
   }
-  if (isPollingJobs.value) {
-    return "Checking Livestorm results.";
-  }
+  if (isPollingJobs.value) return "Checking Livestorm results.";
   return registrationSummary.value.failedJobs
     ? "Review the rows that need attention below."
     : "All done. Review the results below.";
@@ -220,9 +310,12 @@ const completionTitle = computed(() =>
 const completionMessage = computed(() => {
   const { failedJobs, alreadyRegisteredOnlyJobs } = registrationSummary.value;
   if (failedJobs) return "Some rows couldn't be registered. Check the details below and retry if needed.";
-  if (alreadyRegisteredOnlyJobs) return "Nice work. Some were already registered in Livestorm — they're all set.";
+  if (alreadyRegisteredOnlyJobs)
+    return "Nice work. Some were already registered in Livestorm — they're all set.";
   return "Nice work. Livestorm accepted the full batch.";
 });
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function resetMessages() {
   errorMessage.value = "";
@@ -232,18 +325,21 @@ function resetMessages() {
 async function readApiResponse(response, fallbackMessage) {
   const text = await response.text();
   if (!text.trim()) {
-    if (!response.ok) {
-      throw new Error(fallbackMessage);
-    }
+    if (!response.ok) throw new Error(fallbackMessage);
     return {};
   }
-
   try {
     return JSON.parse(text);
   } catch {
     throw new Error(fallbackMessage);
   }
 }
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ── Upload mode handlers ───────────────────────────────────────────────────────
 
 function onFileSelected(file) {
   selectedFile.value = file;
@@ -256,62 +352,34 @@ function onFileSelected(file) {
   resetMessages();
 }
 
-function startNewBatch() {
-  sessionIds.value = "";
-  selectedFile.value = null;
-  preview.value = null;
-  columnSettings.value = [];
-  jobs.value = [];
-  rowResults.value = [];
-  hasSubmittedJobs.value = false;
-  duplicateEmails.value = [];
-  retryingSessions.value = {};
-  totalSessionCount.value = 0;
-  createdSessionCount.value = 0;
-  isSubmitting.value = false;
-  isPreviewLoading.value = false;
-  totalSessionCount.value = 0;
-  createdSessionCount.value = 0;
-  resetMessages();
-}
-
 async function loadPreview() {
   if (!selectedFile.value) {
     errorMessage.value = "Please choose an .xlsx or .csv file first.";
     return;
   }
-
   resetMessages();
   isPreviewLoading.value = true;
-
   try {
     const formData = new FormData();
     formData.append("file", selectedFile.value);
-
-    const response = await fetch("/api/preview", {
-      method: "POST",
-      body: formData,
-    });
-    const data = await readApiResponse(response, "Preview failed. The server returned an empty or invalid response.");
-
-    if (!response.ok) {
-      throw new Error(data.detail || "Preview failed");
-    }
+    const response = await fetch("/api/preview", { method: "POST", body: formData });
+    const data = await readApiResponse(
+      response,
+      "Preview failed. The server returned an empty or invalid response.",
+    );
+    if (!response.ok) throw new Error(data.detail || "Preview failed");
 
     preview.value = data;
-    columnSettings.value = data.headers.map((header) => {
-      const normalized = data.normalized_headers[header];
-      return {
-        column: header,
-        attributeId: normalized,
-        include: true,
-      };
-    });
-    const detectedEmailColumn = data.headers.find(
-      (header) => data.normalized_headers[header] === "email",
+    columnSettings.value = data.headers.map((h) => ({
+      column: h,
+      attributeId: data.normalized_headers[h],
+      include: true,
+    }));
+    const detectedEmailCol = data.headers.find(
+      (h) => data.normalized_headers[h] === "email",
     );
-    duplicateEmails.value = detectedEmailColumn
-      ? data.duplicate_email_columns[detectedEmailColumn] || []
+    duplicateEmails.value = detectedEmailCol
+      ? data.duplicate_email_columns[detectedEmailCol] || []
       : [];
   } catch (error) {
     errorMessage.value = error.message;
@@ -321,17 +389,71 @@ async function loadPreview() {
 }
 
 function updateColumnSetting(index, patch) {
-  columnSettings.value = columnSettings.value.map((column, columnIndex) => {
-    if (columnIndex !== index) {
-      return column;
-    }
-    const nextColumn = { ...column, ...patch };
-    if (nextColumn.attributeId === "email") {
-      nextColumn.include = true;
-    }
-    return nextColumn;
+  columnSettings.value = columnSettings.value.map((c, i) => {
+    if (i !== index) return c;
+    const next = { ...c, ...patch };
+    if (next.attributeId === "email") next.include = true;
+    return next;
   });
 }
+
+// ── Transfer mode handlers ─────────────────────────────────────────────────────
+
+async function fetchSourceRegistrants() {
+  if (!sourceSessionId.value.trim()) {
+    errorMessage.value = "Enter a source session ID.";
+    return;
+  }
+  if (!isAuthenticated.value) {
+    errorMessage.value = "Please connect your Livestorm account first.";
+    return;
+  }
+  resetMessages();
+  isSourceLoading.value = true;
+  transferData.value = null;
+  transferExcludedRows.value = {};
+  transferIncludedFields.value = [];
+
+  try {
+    const response = await fetch("/api/session-people", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sourceSessionId.value.trim() }),
+    });
+    const data = await readApiResponse(
+      response,
+      "Failed to fetch registrants. The server returned an empty or invalid response.",
+    );
+    if (!response.ok) throw new Error(data.detail || "Failed to fetch registrants.");
+    transferData.value = data;
+    transferIncludedFields.value = [...data.headers];
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isSourceLoading.value = false;
+  }
+}
+
+function toggleTransferField(fieldId) {
+  if (fieldId === "email") return;
+  const idx = transferIncludedFields.value.indexOf(fieldId);
+  transferIncludedFields.value =
+    idx >= 0
+      ? transferIncludedFields.value.filter((f) => f !== fieldId)
+      : [...transferIncludedFields.value, fieldId];
+}
+
+function removeTransferRow(index) {
+  transferExcludedRows.value = { ...transferExcludedRows.value, [index]: true };
+}
+
+function restoreTransferRow(index) {
+  const next = { ...transferExcludedRows.value };
+  delete next[index];
+  transferExcludedRows.value = next;
+}
+
+// ── Job lifecycle ──────────────────────────────────────────────────────────────
 
 function attachRowResults(tasks, job) {
   const sourceRows = job?.row_results?.length ? job.row_results : rowResults.value;
@@ -345,29 +467,17 @@ function attachRowResults(tasks, job) {
   }));
 }
 
-function jobFailedTasks(job) {
-  return failedJobTasks(job);
-}
-
-function wait(milliseconds) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
-}
-
 async function pollJobUntilFinished(job) {
   while (!["ended", "failed", "completed"].includes(String(job.status).toLowerCase())) {
     const response = await fetch("/api/job-status", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        session_id: job.session_id,
-        job_id: job.job_id,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: job.session_id, job_id: job.job_id }),
     });
-    const data = await readApiResponse(response, "Failed to fetch job status. The server returned an empty or invalid response.");
+    const data = await readApiResponse(
+      response,
+      "Failed to fetch job status. The server returned an empty or invalid response.",
+    );
 
     if (!response.ok) {
       const detail = data.detail || "Failed to fetch job status";
@@ -395,84 +505,57 @@ async function pollJobUntilFinished(job) {
 }
 
 async function retryFailedRows(job) {
-  let failedRegistrants = jobFailedTasks(job)
-    .map((task) => task.row_result)
-    .filter((row) => row?.email);
+  const failedRegistrants = failedJobTasks(job)
+    .map((t) => t.row_result)
+    .filter((r) => r?.email);
 
   if (!failedRegistrants.length) {
     job.error = "No failed row details were available to retry with single registration.";
     return;
   }
 
-  retryingSessions.value = {
-    ...retryingSessions.value,
-    [job.session_id]: true,
-  };
+  retryingSessions.value = { ...retryingSessions.value, [job.session_id]: true };
 
   try {
     const response = await fetch("/api/retry-failed", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        session_id: job.session_id,
-        registrants: failedRegistrants,
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: job.session_id, registrants: failedRegistrants }),
     });
-    const data = await readApiResponse(response, "Retry failed. The server returned an empty or invalid response.");
-
-    if (!response.ok) {
-      throw new Error(data.detail || "Retry failed");
-    }
-
+    const data = await readApiResponse(
+      response,
+      "Retry failed. The server returned an empty or invalid response.",
+    );
+    if (!response.ok) throw new Error(data.detail || "Retry failed");
     job.retry_results = data.results || [];
   } catch (error) {
     job.error = error.message;
   } finally {
-    retryingSessions.value = {
-      ...retryingSessions.value,
-      [job.session_id]: false,
-    };
+    retryingSessions.value = { ...retryingSessions.value, [job.session_id]: false };
   }
+}
+
+// ── Submit ─────────────────────────────────────────────────────────────────────
+
+function handleSubmit() {
+  if (sourceMode.value === "upload") submitRegistration();
+  else submitTransfer();
 }
 
 async function submitRegistration() {
   resetMessages();
-
-  if (!selectedFile.value) {
-    errorMessage.value = "Please upload an .xlsx or .csv file.";
-    return;
-  }
-  if (!preview.value) {
-    errorMessage.value = "Preview the file before submitting.";
-    return;
-  }
-  if (!parsedSessionIds.value.length) {
-    errorMessage.value = "Session IDs must not be empty.";
-    return;
-  }
-  if (!hasEmailColumn.value) {
-    errorMessage.value = "The file must include an Email column.";
-    return;
-  }
-  const includedAttributeIds = Object.values(autoMapping.value);
-  if (!includedAttributeIds.includes("email")) {
-    errorMessage.value = "The Email column must be included.";
-    return;
-  }
-  if (includedAttributeIds.some((attributeId) => !attributeId)) {
-    errorMessage.value = "Included columns must have a Livestorm field ID.";
-    return;
-  }
-  if (new Set(includedAttributeIds).size !== includedAttributeIds.length) {
+  if (!selectedFile.value) { errorMessage.value = "Please upload an .xlsx or .csv file."; return; }
+  if (!preview.value) { errorMessage.value = "Preview the file before submitting."; return; }
+  if (!parsedSessionIds.value.length) { errorMessage.value = "Session IDs must not be empty."; return; }
+  if (!hasEmailColumn.value) { errorMessage.value = "The file must include an Email column."; return; }
+  const includedIds = Object.values(autoMapping.value);
+  if (!includedIds.includes("email")) { errorMessage.value = "The Email column must be included."; return; }
+  if (includedIds.some((id) => !id)) { errorMessage.value = "Included columns must have a Livestorm field ID."; return; }
+  if (new Set(includedIds).size !== includedIds.length) {
     errorMessage.value = "Included columns cannot use the same Livestorm field ID twice.";
     return;
   }
-  if (!isAuthenticated.value) {
-    errorMessage.value = "Please connect your Livestorm account first.";
-    return;
-  }
+  if (!isAuthenticated.value) { errorMessage.value = "Please connect your Livestorm account first."; return; }
 
   isSubmitting.value = true;
   jobs.value = [];
@@ -482,11 +565,11 @@ async function submitRegistration() {
 
   try {
     for (const sessionId of parsedSessionIds.value) {
-      const expectedChunksForSession = Math.max(
+      const expectedChunks = Math.max(
         1,
         Math.ceil(preview.value.row_count / BULK_JOB_CHUNK_SIZE),
       );
-      for (let chunkIndex = 1; chunkIndex <= expectedChunksForSession; chunkIndex += 1) {
+      for (let chunkIndex = 1; chunkIndex <= expectedChunks; chunkIndex++) {
         const formData = new FormData();
         formData.append("session_ids", sessionId);
         formData.append("mapping", JSON.stringify(autoMapping.value));
@@ -494,11 +577,11 @@ async function submitRegistration() {
         formData.append("chunk_size", String(BULK_JOB_CHUNK_SIZE));
         formData.append("file", selectedFile.value);
 
-        const response = await fetch("/api/register", {
-          method: "POST",
-          body: formData,
-        });
-        const data = await readApiResponse(response, "Registration failed. The server returned an empty or invalid response.");
+        const response = await fetch("/api/register", { method: "POST", body: formData });
+        const data = await readApiResponse(
+          response,
+          "Registration failed. The server returned an empty or invalid response.",
+        );
 
         if (!response.ok) {
           jobs.value.push({
@@ -506,11 +589,11 @@ async function submitRegistration() {
             job_id: `not-created-${chunkIndex}`,
             status: "failed",
             chunk_index: chunkIndex,
-            chunk_count: expectedChunksForSession,
-            row_start: ((chunkIndex - 1) * BULK_JOB_CHUNK_SIZE) + 2,
+            chunk_count: expectedChunks,
+            row_start: (chunkIndex - 1) * BULK_JOB_CHUNK_SIZE + 2,
             row_count: Math.min(
               BULK_JOB_CHUNK_SIZE,
-              preview.value.row_count - ((chunkIndex - 1) * BULK_JOB_CHUNK_SIZE),
+              preview.value.row_count - (chunkIndex - 1) * BULK_JOB_CHUNK_SIZE,
             ),
             row_results: rowResults.value,
             tasks: [],
@@ -522,9 +605,7 @@ async function submitRegistration() {
           continue;
         }
 
-        if (!rowResults.value.length) {
-          rowResults.value = data.row_results || [];
-        }
+        if (!rowResults.value.length) rowResults.value = data.row_results || [];
         duplicateEmails.value = data.duplicate_emails || [];
 
         for (const createdJob of data.jobs || []) {
@@ -544,7 +625,6 @@ async function submitRegistration() {
     }
 
     hasSubmittedJobs.value = true;
-
     successMessage.value = duplicateEmails.value.length
       ? "Batch finished. Duplicate emails were detected in the file, so Livestorm may reject some rows."
       : "Batch finished.";
@@ -554,204 +634,553 @@ async function submitRegistration() {
     isSubmitting.value = false;
   }
 }
+
+async function submitTransfer() {
+  resetMessages();
+  if (!transferData.value) { errorMessage.value = "Fetch registrants from a source session first."; return; }
+  if (!transferActiveRows.value.length) { errorMessage.value = "No registrants to transfer — all rows have been removed."; return; }
+  if (!transferIncludedFields.value.includes("email")) { errorMessage.value = "Email field must be included."; return; }
+  if (!parsedSessionIds.value.length) { errorMessage.value = "Enter at least one target session ID."; return; }
+  if (!isAuthenticated.value) { errorMessage.value = "Please connect your Livestorm account first."; return; }
+
+  const rows = transferActiveRows.value;
+  const chunks = [];
+  for (let i = 0; i < rows.length; i += BULK_JOB_CHUNK_SIZE) {
+    chunks.push(rows.slice(i, i + BULK_JOB_CHUNK_SIZE));
+  }
+
+  isSubmitting.value = true;
+  jobs.value = [];
+  hasSubmittedJobs.value = false;
+  totalSessionCount.value = parsedSessionIds.value.length * chunks.length;
+  createdSessionCount.value = 0;
+
+  try {
+    for (const sessionId of parsedSessionIds.value) {
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const response = await fetch("/api/transfer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target_session_ids: [sessionId],
+            rows: chunks[ci],
+            included_fields: transferIncludedFields.value,
+          }),
+        });
+        const data = await readApiResponse(
+          response,
+          "Transfer failed. The server returned an empty or invalid response.",
+        );
+
+        if (!response.ok) {
+          jobs.value.push({
+            session_id: sessionId,
+            job_id: `not-created-transfer-${ci + 1}`,
+            status: "failed",
+            chunk_index: ci + 1,
+            chunk_count: chunks.length,
+            row_start: ci * BULK_JOB_CHUNK_SIZE + 2,
+            row_count: chunks[ci].length,
+            row_results: [],
+            tasks: [],
+            raw: {},
+            warning: "",
+            error: data.detail || "Transfer failed",
+          });
+          createdSessionCount.value += 1;
+          continue;
+        }
+
+        for (const createdJob of data.jobs || []) {
+          const job = {
+            ...createdJob,
+            row_results: createdJob.row_results || [],
+            tasks: [],
+            raw: {},
+            warning: "",
+            error: "",
+          };
+          jobs.value.push(job);
+          await pollJobUntilFinished(job);
+          createdSessionCount.value += 1;
+        }
+      }
+    }
+
+    hasSubmittedJobs.value = true;
+    successMessage.value = "Transfer complete.";
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isSubmitting.value = false;
+  }
+}
+
+// ── Reset ──────────────────────────────────────────────────────────────────────
+
+function startNewBatch() {
+  sessionIds.value = [];
+  selectedFile.value = null;
+  preview.value = null;
+  columnSettings.value = [];
+  duplicateEmails.value = [];
+  sourceSessionId.value = "";
+  transferData.value = null;
+  transferExcludedRows.value = {};
+  transferIncludedFields.value = [];
+  isSourceLoading.value = false;
+  jobs.value = [];
+  rowResults.value = [];
+  hasSubmittedJobs.value = false;
+  retryingSessions.value = {};
+  totalSessionCount.value = 0;
+  createdSessionCount.value = 0;
+  isSubmitting.value = false;
+  isPreviewLoading.value = false;
+  resetMessages();
+}
 </script>
 
 <template>
-  <main class="page-shell">
-    <section class="hero">
-      <div class="brand-lockup">
-        <img :src="livestormIcon" alt="Livestorm" />
-        <span class="brand-divider"></span>
-        <span class="brand-name">StormBatch</span>
-      </div>
-      <h1>Turn a spreadsheet into<br>Livestorm registrants.</h1>
-      <p class="hero-tagline">Upload your .xlsx or .csv, map columns to Livestorm fields, and batch register attendees to any session.</p>
-    </section>
 
-    <section class="workflow-grid">
-      <div class="panel step-panel">
-        <div class="step-label">Step 1</div>
-        <ApiKeyInput
-          :authenticated="isAuthenticated"
-          :loading="isAuthLoading"
-          @login="handleLogin"
-          @logout="handleLogout"
-        />
-        <SessionIdsInput v-model="sessionIds" :count="parsedSessionIds.length" />
+  <!-- ── App bar ───────────────────────────────────────────────────────────── -->
+
+  <header class="app-bar">
+    <div class="app-bar-brand">
+      <img :src="livestormIcon" alt="Livestorm" class="app-bar-logo" />
+      <span class="app-bar-sep"></span>
+      <span class="app-bar-name">StormBatch</span>
+      <span class="app-bar-beta">Beta</span>
+    </div>
+    <div class="app-bar-auth">
+      <span v-if="isAuthLoading" class="auth-status-text">Connecting…</span>
+      <template v-else-if="isAuthenticated">
+        <div class="user-badge">
+          <div class="user-avatar">
+            <img v-if="userProfile?.avatar_link" :src="userProfile.avatar_link" :alt="userName" class="user-avatar-img" />
+            <span v-else class="user-initials">{{ userInitials }}</span>
+          </div>
+          <span v-if="userName" class="user-name">{{ userName }}</span>
+        </div>
+        <button class="bar-btn" type="button" @click="handleLogout">Disconnect</button>
+      </template>
+    </div>
+  </header>
+
+  <main class="page-shell">
+
+    <!-- ── Step track ────────────────────────────────────────────────────────── -->
+
+    <div class="step-track">
+      <div class="step-item" :class="{ active: !isAuthenticated && !isAuthLoading, done: isAuthenticated }">
+        <div class="step-circ">
+          <svg v-if="isAuthenticated" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          <span v-else>1</span>
+        </div>
+        <span class="step-lbl">Connect</span>
       </div>
-      <div class="panel step-panel">
-        <div class="step-label">Step 2</div>
+      <div class="step-conn" :class="{ done: isAuthenticated }"></div>
+      <div class="step-item" :class="{ active: isAuthenticated && !(sourceMode === 'upload' ? preview : transferData), done: Boolean(sourceMode === 'upload' ? preview : transferData), locked: !isAuthenticated }">
+        <div class="step-circ">
+          <svg v-if="sourceMode === 'upload' ? preview : transferData" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          <span v-else>2</span>
+        </div>
+        <span class="step-lbl">Source</span>
+      </div>
+      <div class="step-conn" :class="{ done: parsedSessionIds.length > 0 }"></div>
+      <div class="step-item" :class="{ active: Boolean(sourceMode === 'upload' ? preview : transferData) && parsedSessionIds.length === 0, done: parsedSessionIds.length > 0, locked: !isAuthenticated }">
+        <div class="step-circ">
+          <svg v-if="parsedSessionIds.length > 0" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          <span v-else>3</span>
+        </div>
+        <span class="step-lbl">Target</span>
+      </div>
+    </div>
+
+    <!-- ── Onboarding (not connected) ──────────────────────────────────────── -->
+
+    <div v-if="!isAuthenticated && !isAuthLoading" class="onboarding-state">
+      <div class="onboarding-card">
+        <div class="onboarding-brand">
+          <img :src="livestormIcon" alt="Livestorm" class="onboarding-logo" />
+          <span class="onboarding-brand-sep"></span>
+          <span class="onboarding-brand-name">StormBatch</span>
+        </div>
+        <h2 class="onboarding-title">Batch register Livestorm attendees</h2>
+        <p class="onboarding-desc">
+          Upload a spreadsheet or pull registrants from an existing session,
+          then push them to any number of Livestorm sessions at once.
+        </p>
+        <ul class="onboarding-features">
+          <li>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Upload .xlsx or .csv files
+          </li>
+          <li>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Transfer registrants between sessions
+          </li>
+          <li>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Register to multiple target sessions at once
+          </li>
+        </ul>
+        <button class="primary-button onboarding-cta" type="button" @click="handleLogin">
+          <img :src="livestormIcon" alt="" class="bar-btn-icon" />
+          Connect with Livestorm
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Authenticated content ──────────────────────────────────────────── -->
+
+    <template v-else-if="isAuthenticated">
+
+      <!-- Source card -->
+      <div class="panel source-panel">
+        <h2 class="step-heading">Choose source</h2>
+
+        <div class="mode-toggle" role="group" aria-label="Source type">
+          <button
+            :class="['mode-btn', { active: sourceMode === 'upload' }]"
+            type="button"
+            @click="setSourceMode('upload')"
+          >
+            Upload file
+          </button>
+          <button
+            :class="['mode-btn', { active: sourceMode === 'transfer' }]"
+            type="button"
+            @click="setSourceMode('transfer')"
+          >
+            Transfer from session
+          </button>
+        </div>
+
         <FileUpload
+          v-if="sourceMode === 'upload'"
           :selected-file="selectedFile"
           :loading="isPreviewLoading"
           :preview-ready="Boolean(preview)"
           @file-selected="onFileSelected"
           @preview="loadPreview"
         />
-      </div>
-    </section>
 
-    <section v-if="errorMessage" class="notice error">{{ errorMessage }}</section>
-    <section v-if="successMessage" class="notice success">{{ successMessage }}</section>
-
-    <section v-if="preview" class="panel preview-panel">
-      <div class="panel-header">
-        <div>
-          <span class="step-label">Step 3</span>
-          <h2>Preview registrants</h2>
-          <p>{{ preview.row_count }} rows, {{ preview.headers.length }} columns</p>
-        </div>
-        <div class="preview-statuses">
-          <div class="status-pill" :class="{ ok: hasEmailColumn, error: !hasEmailColumn }">
-            {{ hasEmailColumn ? "Email detected" : "Email column missing" }}
-          </div>
-          <div v-if="duplicateEmails.length" class="warning-pill">
-            Duplicate emails: {{ duplicateEmails.join(", ") }}
-          </div>
-        </div>
+        <SourceSessionInput
+          v-else
+          v-model="sourceSessionId"
+          :loading="isSourceLoading"
+          :fetched-count="transferData ? transferData.total : null"
+          @fetch="fetchSourceRegistrants"
+        />
       </div>
 
-      <div class="attribute-preview">
-        <div
-          v-for="(item, index) in mappedAttributePreview"
-          :key="item.column"
-          class="column-card"
-          :class="{ included: item.include }"
-        >
+      <!-- ── Upload mode: column preview + mapping -->
+
+      <section v-if="sourceMode === 'upload' && preview" class="panel preview-panel">
+        <div class="panel-header">
           <div>
-            <strong>{{ item.column }}</strong>
-            <span>{{ item.required ? "Required email field" : "Optional field" }}</span>
+            <span class="step-label">Preview</span>
+            <h2>Preview registrants</h2>
+            <p>{{ preview.row_count }} rows · {{ preview.headers.length }} columns</p>
           </div>
-          <div class="column-actions">
-            <label class="include-toggle" :class="{ disabled: item.required }">
-              <input
-                type="checkbox"
-                :checked="item.include"
-                :disabled="item.required"
-                @change="updateColumnSetting(index, { include: $event.target.checked })"
-              />
-              <span class="toggle-track">
-                <span class="toggle-thumb"></span>
-              </span>
-            </label>
-            <strong class="toggle-label">{{ item.include ? "Send" : "Drop" }}</strong>
+          <div class="preview-statuses">
+            <div class="status-pill" :class="{ ok: hasEmailColumn, error: !hasEmailColumn }">
+              {{ hasEmailColumn ? "Email detected" : "Email column missing" }}
+            </div>
+            <div v-if="duplicateEmails.length" class="warning-pill">
+              Duplicate emails: {{ duplicateEmails.join(", ") }}
+            </div>
           </div>
-          <input
-            :value="item.attributeId"
-            :disabled="!item.include || item.required"
-            placeholder="Livestorm field ID"
-            @input="updateColumnSetting(index, { attributeId: $event.target.value })"
-          />
         </div>
-      </div>
-      <PreviewTable :headers="preview.headers" :rows="preview.preview_rows" />
 
-      <div class="cta-card">
+        <div class="attribute-preview">
+          <div
+            v-for="(item, index) in mappedAttributePreview"
+            :key="item.column"
+            class="column-card"
+            :class="{ included: item.include }"
+          >
+            <div>
+              <strong>{{ item.column }}</strong>
+              <span>{{ item.required ? "Required email field" : "Optional field" }}</span>
+            </div>
+            <div class="column-actions">
+              <label class="include-toggle" :class="{ disabled: item.required }">
+                <input
+                  type="checkbox"
+                  :checked="item.include"
+                  :disabled="item.required"
+                  @change="updateColumnSetting(index, { include: $event.target.checked })"
+                />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+              <strong class="toggle-label">{{ item.include ? "Send" : "Drop" }}</strong>
+            </div>
+            <input
+              :value="item.attributeId"
+              :disabled="!item.include || item.required"
+              placeholder="Livestorm field ID"
+              @input="updateColumnSetting(index, { attributeId: $event.target.value })"
+            />
+          </div>
+        </div>
+
+        <PreviewTable :headers="preview.headers" :rows="preview.preview_rows" />
+      </section>
+
+      <!-- ── Transfer mode: registrant editor -->
+
+      <section v-if="sourceMode === 'transfer' && transferData" class="panel preview-panel">
+        <div class="panel-header">
+          <div>
+            <span class="step-label">Registrants</span>
+            <h2>{{ transferData.total }} registrants</h2>
+            <p class="source-session-id">from session {{ transferData.session_id }}</p>
+          </div>
+          <div class="preview-statuses">
+            <div class="status-pill ok">
+              {{ transferActiveRows.length }} included
+            </div>
+            <div v-if="transferExcludedCount" class="status-pill error">
+              {{ transferExcludedCount }} removed
+            </div>
+          </div>
+        </div>
+
+        <div class="field-toggles-section">
+          <span class="field-toggles-label">Columns to transfer</span>
+          <div class="attribute-preview">
+            <div
+              v-for="field in transferData.headers"
+              :key="field"
+              class="column-card"
+              :class="{ included: transferIncludedFields.includes(field) }"
+            >
+              <div>
+                <strong>{{ field }}</strong>
+                <span>{{ field === 'email' ? 'Required' : 'Optional' }}</span>
+              </div>
+              <div class="column-actions">
+                <label class="include-toggle" :class="{ disabled: field === 'email' }">
+                  <input
+                    type="checkbox"
+                    :checked="transferIncludedFields.includes(field)"
+                    :disabled="field === 'email'"
+                    @change="toggleTransferField(field)"
+                  />
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </label>
+                <strong class="toggle-label">
+                  {{ transferIncludedFields.includes(field) ? "Send" : "Drop" }}
+                </strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="registrant-table-wrap">
+          <table class="registrant-table">
+            <thead>
+              <tr>
+                <th class="action-th"></th>
+                <th v-for="field in transferIncludedFields" :key="field">{{ field }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(row, index) in transferData.rows"
+                :key="index"
+                :class="{ 'row-removed': transferExcludedRows[index] }"
+              >
+                <td class="action-td">
+                  <button
+                    v-if="!transferExcludedRows[index]"
+                    class="row-action-btn remove"
+                    type="button"
+                    title="Remove this registrant"
+                    @click="removeTransferRow(index)"
+                  >✕</button>
+                  <button
+                    v-else
+                    class="row-action-btn restore"
+                    type="button"
+                    title="Restore this registrant"
+                    @click="restoreTransferRow(index)"
+                  >↩</button>
+                </td>
+                <td v-for="field in transferIncludedFields" :key="field">
+                  {{ row[field] || "" }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ── Target sessions card (appears when source is ready) ──────────── -->
+
+      <Transition name="slide-up">
+        <div
+          v-if="sourceMode === 'upload' ? Boolean(preview) : Boolean(transferData)"
+          class="panel target-panel"
+        >
+          <h2 class="step-heading">Target sessions</h2>
+          <SessionIdsInput v-model="sessionIds" />
+        </div>
+      </Transition>
+
+      <!-- ── Notices -->
+
+      <section v-if="errorMessage" class="notice error">{{ errorMessage }}</section>
+      <section v-if="successMessage" class="notice success">{{ successMessage }}</section>
+
+      <!-- ── Submit CTA -->
+
+      <section v-if="isReadyToSubmit" class="cta-card">
         <div>
-          <span class="step-label">Step 4</span>
-          <h2>Ready to batch register?</h2>
-          <p>
+          <h2>Ready to register?</h2>
+          <p v-if="sourceMode === 'upload'">
             This will create {{ expectedJobCount }} Livestorm job(s) in batches of
             {{ BULK_JOB_CHUNK_SIZE }} registrants or fewer.
+          </p>
+          <p v-else>
+            {{ transferActiveRows.length }} registrant(s) will be transferred to
+            {{ parsedSessionIds.length }} session(s) in batches of
+            {{ BULK_JOB_CHUNK_SIZE }}.
           </p>
         </div>
         <div class="cta-actions">
           <button
             class="primary-button"
             :disabled="isSubmitting || isPollingJobs"
-            @click="submitRegistration"
+            @click="handleSubmit"
           >
-            {{ isSubmitting ? "Creating jobs..." : "Batch register now" }}
+            {{ isSubmitting
+              ? (sourceMode === "transfer" ? "Transferring…" : "Creating jobs…")
+              : (sourceMode === "transfer" ? "Transfer now" : "Batch register now") }}
           </button>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section v-if="jobs.length || isSubmitting" class="panel progress-panel">
-      <div class="panel-header">
-        <div>
-          <span class="step-label">Job progress</span>
-          <h2>{{ progressTitle }}</h2>
-          <p>{{ progressMessage }}</p>
+      <!-- ── Progress -->
+
+      <section v-if="jobs.length || isSubmitting" class="panel progress-panel">
+        <div class="panel-header">
+          <div>
+            <span class="step-label">Job progress</span>
+            <h2>{{ progressTitle }}</h2>
+            <p>{{ progressMessage }}</p>
+          </div>
+          <strong class="progress-percent">{{ progressPercent }}%</strong>
         </div>
-        <strong class="progress-percent">{{ progressPercent }}%</strong>
-      </div>
-      <div class="progress-track">
-        <div class="progress-fill" :style="{ width: `${progressPercent}%` }"></div>
-      </div>
-    </section>
-
-    <section
-      v-if="hasSubmittedJobs && !isPollingJobs && jobs.length"
-      class="confirmation-card"
-      :class="{ failed: registrationSummary.failedJobs }"
-    >
-      <div class="confirmation-icon">
-        <svg v-if="!registrationSummary.failedJobs" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <polyline points="20 6 9 17 4 12"/>
-        </svg>
-        <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <line x1="12" y1="8" x2="12" y2="13"/>
-          <line x1="12" y1="17" x2="12.01" y2="17"/>
-        </svg>
-      </div>
-      <div>
-        <h2>{{ completionTitle }}</h2>
-        <p>{{ completionMessage }}</p>
-      </div>
-      <button class="new-batch-button" type="button" @click="startNewBatch">
-        New Batch
-      </button>
-    </section>
-
-    <section v-if="visibleResultJobs.length" class="panel">
-      <div class="panel-header results-header">
-        <div>
-          <span class="step-label">Results</span>
-          <h2>Rows needing attention</h2>
+        <div class="progress-track">
+          <div class="progress-fill" :style="{ width: `${progressPercent}%` }"></div>
         </div>
-      </div>
-      <JobResults
-        :jobs="visibleResultJobs"
-        :retrying-sessions="retryingSessions"
-        @retry-failed="retryFailedRows"
-      />
-    </section>
+      </section>
+
+      <!-- ── Completion card -->
+
+      <section
+        v-if="hasSubmittedJobs && !isPollingJobs && jobs.length"
+        class="confirmation-card"
+        :class="{ failed: registrationSummary.failedJobs }"
+      >
+        <div class="confirmation-icon">
+          <svg v-if="!registrationSummary.failedJobs" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <svg v-else width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="12" y1="8" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div>
+          <h2>{{ completionTitle }}</h2>
+          <p>{{ completionMessage }}</p>
+        </div>
+        <button class="new-batch-button" type="button" @click="startNewBatch">
+          New Batch
+        </button>
+      </section>
+
+      <!-- ── Results -->
+
+      <section v-if="visibleResultJobs.length" class="panel">
+        <div class="panel-header results-header">
+          <div>
+            <span class="step-label">Results</span>
+            <h2>Rows needing attention</h2>
+          </div>
+        </div>
+        <JobResults
+          :jobs="visibleResultJobs"
+          :retrying-sessions="retryingSessions"
+          @retry-failed="retryFailedRows"
+        />
+      </section>
+
+    </template>
+
+    <!-- ── Beta notice footer ──────────────────────────────────────────────── -->
+
+    <div class="beta-notice">
+      <span class="beta-notice-chip">Beta</span>
+      Early-access helper, not an official Livestorm product.
+      <button class="beta-notice-link" type="button" @click="showBetaInfo = true">Read more</button>
+    </div>
+
   </main>
+
+  <BetaInfoModal v-if="showBetaInfo" @close="showBetaInfo = false" />
 </template>
 
 <style>
-/* ── Shell ────────────────────────────────────────── */
+/* ── Viewport lock ────────────────────────────────── */
 
-.page-shell {
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 48px 20px 64px;
-  min-height: 100vh;
+html,
+body {
+  height: 100%;
+  overflow: hidden;
 }
 
-/* ── Hero ─────────────────────────────────────────── */
-
-.hero {
-  padding-bottom: 48px;
-  margin-bottom: 40px;
-  border-bottom: 1px solid var(--color-borders-neutral-light);
-}
-
-.brand-lockup {
+#app {
+  height: 100%;
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── App bar ──────────────────────────────────────── */
+
+.app-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
   align-items: center;
-  margin-bottom: 32px;
+  justify-content: space-between;
+  padding: 0 32px;
+  height: 56px;
+  background: var(--color-surface-neutral-100);
+  border-bottom: 1px solid var(--color-borders-neutral-light);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
 }
 
-.brand-lockup img {
-  width: 26px;
-  height: 26px;
+.app-bar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.app-bar-logo {
+  width: 22px;
+  height: 22px;
   object-fit: contain;
+  flex-shrink: 0;
 }
 
-.brand-divider {
+.app-bar-sep {
   display: block;
   width: 1px;
   height: 16px;
@@ -759,39 +1188,164 @@ async function submitRegistration() {
   flex-shrink: 0;
 }
 
-.brand-name {
-  color: var(--color-text-neutral-tertiary);
+.app-bar-name {
+  color: var(--color-text-neutral-secondary);
   font-size: var(--text-content-legends-bold-md);
   font-weight: var(--text-content-legends-bold-md--font-weight);
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
-.hero h1 {
-  max-width: 700px;
-  margin: 0 0 16px;
-  color: var(--color-text-neutral-base);
-  font-size: clamp(34px, 5vw, 52px);
-  line-height: 1.08;
-  font-weight: 700;
-  letter-spacing: -0.025em;
+.app-bar-auth {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.hero-tagline {
-  max-width: 540px;
-  margin: 0;
+.auth-status-text {
+  font-size: var(--text-content-legends-regular-md);
+  color: var(--color-text-neutral-tertiary);
+}
+
+.auth-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: var(--color-surface-success-300);
+  border: 1px solid var(--color-borders-success-light);
+  color: var(--color-text-success-secondary);
+  font-size: var(--text-content-legends-bold-md);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+}
+
+.bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 7px;
+  padding: 7px 14px;
+  font-size: var(--text-content-text-bold-md);
+  font-weight: var(--text-content-text-bold-md--font-weight);
+  line-height: var(--text-content-text-bold-md--line-height);
   color: var(--color-text-neutral-secondary);
-  font-size: var(--text-content-text-regular-md);
-  line-height: 1.65;
+  background: transparent;
+  border: 1px solid var(--color-borders-neutral-default);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-/* ── Layout ───────────────────────────────────────── */
+.bar-btn:hover {
+  background: var(--color-actions-neutral-hover-overlay);
+  border-color: var(--color-borders-neutral-strong);
+}
 
-.workflow-grid {
+.bar-btn.primary {
+  color: var(--color-text-neutral-complementary-base);
+  background: var(--color-actions-primary-idle);
+  border-color: transparent;
+}
+
+.bar-btn.primary:hover {
+  background: var(--color-actions-primary-idle-alpha-strong);
+  box-shadow: 0 0 0 1px var(--color-actions-primary-idle);
+}
+
+.bar-btn-icon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+/* ── Step track ───────────────────────────────────── */
+
+.step-track {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 28px;
+}
+
+.step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.step-circ {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--color-borders-neutral-light);
+  background: transparent;
+  color: var(--color-text-neutral-tertiary);
+  font-size: 13px;
+  font-weight: 600;
   display: grid;
-  grid-template-columns: 0.95fr 1.05fr;
+  place-items: center;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.step-item.active .step-circ {
+  border-color: var(--color-actions-primary-idle);
+  color: var(--color-actions-primary-idle);
+  background: var(--color-actions-primary-idle-alpha-light);
+}
+
+.step-item.done .step-circ {
+  border-color: var(--color-actions-success-idle);
+  background: var(--color-actions-success-idle);
+  color: #fff;
+}
+
+.step-lbl {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-neutral-tertiary);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+.step-item.active .step-lbl,
+.step-item.done .step-lbl {
+  color: var(--color-text-neutral-base);
+}
+
+.step-conn {
+  flex: 1;
+  height: 2px;
+  background: var(--color-borders-neutral-light);
+  margin-top: 15px;
+  transition: background 0.25s ease;
+}
+
+.step-conn.done {
+  background: var(--color-actions-success-idle);
+}
+
+/* ── Shell ────────────────────────────────────────── */
+
+.page-shell {
+  flex: 1;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Steps grid ───────────────────────────────────── */
+
+.steps-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
   gap: 20px;
-  align-items: stretch;
+  align-items: start;
+  margin-bottom: 24px;
 }
 
 /* ── Panels ───────────────────────────────────────── */
@@ -806,12 +1360,11 @@ async function submitRegistration() {
 }
 
 .step-panel {
-  min-height: 100%;
+  margin-bottom: 0;
 }
 
 .preview-panel {
   border-color: var(--color-borders-neutral-default);
-  margin-top: 24px;
 }
 
 .panel-header {
@@ -840,6 +1393,15 @@ async function submitRegistration() {
   color: var(--color-text-neutral-secondary);
 }
 
+/* ── Step heading ─────────────────────────────────── */
+
+.step-heading {
+  margin: 0 0 16px;
+  color: var(--color-text-neutral-base);
+  font-size: var(--text-title-sm, 16px);
+  font-weight: 600;
+}
+
 /* ── Step labels ──────────────────────────────────── */
 
 .step-label {
@@ -857,10 +1419,43 @@ async function submitRegistration() {
   letter-spacing: 0.04em;
 }
 
+/* ── Mode toggle ──────────────────────────────────── */
+
+.mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--color-surface-neutral-300);
+  margin-bottom: 16px;
+}
+
+.mode-btn {
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: var(--text-content-text-bold-md);
+  line-height: var(--text-content-text-bold-md--line-height);
+  font-weight: var(--text-content-text-bold-md--font-weight);
+  color: var(--color-text-neutral-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.mode-btn.active {
+  background: var(--color-surface-neutral-100);
+  color: var(--color-text-neutral-base);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
 /* ── Notices ──────────────────────────────────────── */
 
 .notice {
-  margin-top: 16px;
+  margin-top: 4px;
   margin-bottom: 20px;
   padding: 14px 16px;
   border-radius: 10px;
@@ -926,7 +1521,7 @@ async function submitRegistration() {
 
 .attribute-preview {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -1046,6 +1641,121 @@ async function submitRegistration() {
   outline-offset: 2px;
 }
 
+/* ── Transfer: field toggles section ─────────────── */
+
+.field-toggles-section {
+  margin-bottom: 20px;
+}
+
+.field-toggles-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-legends-bold-md);
+  line-height: var(--text-content-legends-bold-md--line-height);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+}
+
+.source-session-id {
+  font-size: var(--text-content-legends-regular-md);
+  word-break: break-all;
+}
+
+/* ── Transfer: registrant table ───────────────────── */
+
+.registrant-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 480px;
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 10px;
+}
+
+.registrant-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-content-text-regular-md, 14px);
+}
+
+.registrant-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface-neutral-200);
+}
+
+.registrant-table th {
+  padding: 10px 14px;
+  text-align: left;
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-legends-bold-md);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+  border-bottom: 1px solid var(--color-borders-neutral-light);
+  white-space: nowrap;
+}
+
+.registrant-table td {
+  padding: 9px 14px;
+  color: var(--color-text-neutral-base);
+  border-bottom: 1px solid var(--color-borders-neutral-light);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.registrant-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.registrant-table tbody tr:hover:not(.row-removed) {
+  background: var(--color-actions-neutral-hover-overlay);
+}
+
+.registrant-table tbody tr.row-removed {
+  opacity: 0.35;
+}
+
+.action-th,
+.action-td {
+  width: 36px;
+  min-width: 36px;
+  padding: 6px 8px !important;
+}
+
+.row-action-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.row-action-btn.remove {
+  color: var(--color-text-danger-secondary);
+  background: transparent;
+}
+
+.row-action-btn.remove:hover {
+  background: var(--color-surface-danger-300);
+  border-color: var(--color-borders-danger-light);
+}
+
+.row-action-btn.restore {
+  color: var(--color-text-primary-base);
+  background: transparent;
+}
+
+.row-action-btn.restore:hover {
+  background: var(--color-surface-primary-100);
+  border-color: var(--color-borders-primary-light);
+}
+
 /* ── CTA card ─────────────────────────────────────── */
 
 .cta-card {
@@ -1053,7 +1763,7 @@ async function submitRegistration() {
   grid-template-columns: minmax(0, 1fr) 260px;
   gap: 18px;
   align-items: center;
-  margin-top: 20px;
+  margin-bottom: 20px;
   background: var(--color-surface-neutral-200);
   border: 1px solid var(--color-borders-neutral-light);
   border-radius: 12px;
@@ -1062,7 +1772,7 @@ async function submitRegistration() {
 }
 
 .cta-card p {
-  margin-bottom: 0;
+  margin: 6px 0 0;
   color: var(--color-text-neutral-secondary);
 }
 
@@ -1187,22 +1897,264 @@ async function submitRegistration() {
   margin-bottom: 14px;
 }
 
+/* ── User profile badge ───────────────────────────── */
+
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--color-actions-primary-idle-alpha-light);
+  border: 1.5px solid var(--color-borders-primary-light);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.user-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-initials {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-actions-primary-idle);
+  letter-spacing: 0.03em;
+  line-height: 1;
+}
+
+.user-name {
+  font-size: var(--text-content-legends-bold-md);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+  color: var(--color-text-neutral-secondary);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Onboarding state ─────────────────────────────── */
+
+.onboarding-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0;
+}
+
+.onboarding-card {
+  width: 100%;
+  max-width: 480px;
+  background: var(--color-surface-neutral-200);
+  border: 1px solid var(--color-borders-neutral-light);
+  border-radius: 16px;
+  padding: 40px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 20px;
+}
+
+.onboarding-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.onboarding-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.onboarding-brand-sep {
+  display: block;
+  width: 1px;
+  height: 18px;
+  background: var(--color-borders-neutral-light);
+}
+
+.onboarding-brand-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-neutral-secondary);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.onboarding-title {
+  margin: 0;
+  font-size: var(--text-title-lg);
+  line-height: var(--text-title-lg--line-height);
+  font-weight: var(--text-title-lg--font-weight);
+  color: var(--color-text-neutral-base);
+}
+
+.onboarding-desc {
+  margin: 0;
+  color: var(--color-text-neutral-secondary);
+  line-height: 1.6;
+  font-size: var(--text-content-text-regular-md, 14px);
+}
+
+.onboarding-features {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.onboarding-features li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-content-text-regular-md, 14px);
+  color: var(--color-text-neutral-secondary);
+}
+
+.onboarding-features li svg {
+  color: var(--color-actions-success-idle);
+  flex-shrink: 0;
+}
+
+.onboarding-cta {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto !important;
+  padding: 12px 20px !important;
+  margin-top: 4px;
+}
+
+/* ── Step locked state ────────────────────────────── */
+
+.step-item.locked .step-circ {
+  border-color: var(--color-borders-neutral-light);
+  color: var(--color-text-neutral-tertiary);
+  opacity: 0.4;
+}
+
+.step-item.locked .step-lbl {
+  color: var(--color-text-neutral-tertiary);
+  opacity: 0.4;
+}
+
+/* ── Slide-up transition ──────────────────────────── */
+
+.slide-up-enter-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.slide-up-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+/* ── Source / target panel variants ──────────────── */
+
+.source-panel {
+  max-width: 680px;
+}
+
+.target-panel {
+  max-width: 680px;
+}
+
+/* ── App bar beta chip ────────────────────────────── */
+
+.app-bar-beta {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: var(--color-actions-primary-idle-alpha-light);
+  border: 1px solid var(--color-borders-primary-light);
+  color: var(--color-actions-primary-idle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+/* ── Beta notice footer ───────────────────────────── */
+
+.beta-notice {
+  margin-top: auto;
+  padding-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--color-text-neutral-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.beta-notice-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-surface-neutral-300);
+  border: 1px solid var(--color-borders-neutral-light);
+  color: var(--color-text-neutral-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.beta-notice-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-actions-primary-idle);
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: opacity 0.15s ease;
+}
+
+.beta-notice-link:hover {
+  opacity: 0.75;
+}
+
 /* ── Responsive ───────────────────────────────────── */
 
-@media (max-width: 860px) {
-  .workflow-grid,
+@media (max-width: 800px) {
+  .steps-grid,
   .cta-card {
     grid-template-columns: 1fr;
   }
+
+  .app-bar {
+    padding: 0 16px;
+  }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 540px) {
   .page-shell {
-    padding: 24px 16px 40px;
-  }
-
-  .hero h1 {
-    font-size: 32px;
+    padding: 20px 16px 40px;
   }
 
   .panel,
@@ -1214,6 +2166,10 @@ async function submitRegistration() {
   .confirmation-card {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .step-track {
+    margin-bottom: 20px;
   }
 }
 </style>

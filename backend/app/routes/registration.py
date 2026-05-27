@@ -14,7 +14,9 @@ from app.services.row_metadata import build_row_results
 
 router = APIRouter(tags=["registration"])
 BULK_JOB_TASK_LIMIT = 50
-LIVESTORM_REQUEST_DELAY_SECONDS = 1.25
+# 0.25 s between bulk-job creations → 4 req/s, safely under the 5 req/s burst limit.
+# 429 responses are retried automatically by LivestormClient._request.
+LIVESTORM_REQUEST_DELAY_SECONDS = 0.25
 
 
 def iter_chunks(items: list[dict], size: int) -> list[tuple[int, list[dict]]]:

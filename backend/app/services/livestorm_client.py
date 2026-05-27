@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional, Union
 
 import httpx
 import re
+
+_MAX_RETRIES = 3
 
 
 class LivestormAPIError(Exception):
@@ -34,6 +37,16 @@ class LivestormClient:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self._client.aclose()
 
+    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Make an API request, respecting 429 Retry-After up to _MAX_RETRIES times."""
+        for attempt in range(_MAX_RETRIES):
+            response = await self._client.request(method, path, **kwargs)
+            if response.status_code != 429:
+                return response
+            retry_after = float(response.headers.get("Retry-After", "1.0"))
+            await asyncio.sleep(retry_after)
+        return response
+
     async def create_bulk_job(self, session_id: str, tasks: list[dict]) -> dict[str, str]:
         payload = {
             "data": {
@@ -43,7 +56,7 @@ class LivestormClient:
                 },
             }
         }
-        response = await self._client.post(f"/v1/sessions/{session_id}/people/bulk", json=payload)
+        response = await self._request("POST", f"/v1/sessions/{session_id}/people/bulk", json=payload)
         data = self._handle_response(response, "Livestorm API request failed")
 
         job_id = (
@@ -74,7 +87,8 @@ class LivestormClient:
                 "attributes": attributes,
             }
         }
-        response = await self._client.post(
+        response = await self._request(
+            "POST",
             f"/v1/sessions/{session_id}/people",
             json=payload,
             headers={
@@ -89,7 +103,7 @@ class LivestormClient:
         }
 
     async def get_job_status(self, session_id: str, job_id: str) -> dict[str, Any]:
-        response = await self._client.get(f"/v1/jobs/{job_id}")
+        response = await self._request("GET", f"/v1/jobs/{job_id}")
         job_data = self._handle_response(response, "Unable to fetch Livestorm job status")
 
         status = (
@@ -97,7 +111,7 @@ class LivestormClient:
             or job_data.get("status")
             or "pending"
         )
-        response = {
+        result: dict[str, Any] = {
             "session_id": session_id,
             "job_id": job_id,
             "status": status,
@@ -108,16 +122,16 @@ class LivestormClient:
 
         if str(status).lower() in {"ended", "failed", "completed"}:
             try:
-                response["tasks"] = await self.list_job_tasks(job_id)
+                result["tasks"] = await self.list_job_tasks(job_id)
             except LivestormAPIError as exc:
-                response["tasks_error"] = str(exc)
+                result["tasks_error"] = str(exc)
 
-        return response
+        return result
 
     async def list_job_tasks(self, job_id: str) -> list[dict[str, Any]]:
         # The Livestorm /v1/jobs/{job_id}/tasks endpoint returns a 500 error when
         # any pagination query params are passed, so we fetch all tasks in one call.
-        tasks_response = await self._client.get(f"/v1/jobs/{job_id}/tasks")
+        tasks_response = await self._request("GET", f"/v1/jobs/{job_id}/tasks")
         if tasks_response.status_code >= 400:
             raise self._build_error(tasks_response, "Unable to fetch Livestorm job tasks")
 
@@ -130,6 +144,7 @@ class LivestormClient:
         session_id: str,
         email: Optional[str] = None,
         page_size: int = 50,
+        inter_page_delay: float = 0.3,
     ) -> list[dict[str, Any]]:
         page_number = 0
         people = []
@@ -142,7 +157,8 @@ class LivestormClient:
             if email:
                 params["filter[email]"] = email
 
-            response = await self._client.get(
+            response = await self._request(
+                "GET",
                 f"/v1/sessions/{session_id}/people",
                 params=params,
                 headers={"Accept": "application/vnd.api+json"},
@@ -155,32 +171,28 @@ class LivestormClient:
                 break
 
             meta = data.get("meta", {})
-            pagination = meta.get("pagination", meta.get("page", meta))
-            next_page = (
-                pagination.get("next_page")
-                or pagination.get("nextPage")
-                or pagination.get("next")
-            )
-            total_pages = (
-                pagination.get("total_pages")
-                or pagination.get("totalPages")
-                or pagination.get("page_count")
-                or pagination.get("pageCount")
-                or pagination.get("last")
-            )
-            current_page = (
-                pagination.get("current_page")
-                or pagination.get("currentPage")
-                or pagination.get("number")
-                or page_number
-            )
+            pagination = meta.get("pagination") or meta.get("page") or meta
 
-            if total_pages and int(current_page) + 1 >= int(total_pages):
+            def _first(*keys: str) -> Any:
+                for k in keys:
+                    v = pagination.get(k)
+                    if v is not None:
+                        return v
+                return None
+
+            next_page = _first("next_page", "nextPage", "next")
+            total_pages = _first("total_pages", "totalPages", "page_count", "pageCount", "last")
+            current_page = _first("current_page", "currentPage", "number")
+            if current_page is None:
+                current_page = page_number
+
+            if total_pages is not None and int(current_page) + 1 >= int(total_pages):
                 break
             if next_page is None:
                 break
 
-            page_number = int(next_page) if next_page is not None else page_number + 1
+            page_number = int(next_page)
+            await asyncio.sleep(inter_page_delay)
 
         return people
 
