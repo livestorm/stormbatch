@@ -59,13 +59,12 @@ defineEmits(["update:modelValue", "fetch"]);
 }
 
 .source-input-row {
-  display: flex;
+  display: grid;
   gap: 8px;
 }
 
 .source-input-row input {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
   border: 1px solid var(--color-borders-neutral-light);
   border-radius: 8px;
   padding: 10px 12px;
@@ -73,10 +72,12 @@ defineEmits(["update:modelValue", "fetch"]);
   background: var(--color-surface-neutral-100);
   font-size: var(--text-content-text-regular-lg);
   line-height: var(--text-content-text-regular-lg--line-height);
+  font-family: ui-monospace, "SFMono-Regular", monospace;
 }
 
 .source-input-row input::placeholder {
   color: var(--color-text-neutral-tertiary);
+  font-family: inherit;
 }
 
 .source-input-row input:focus {
@@ -89,8 +90,8 @@ defineEmits(["update:modelValue", "fetch"]);
 }
 
 .fetch-btn {
-  flex-shrink: 0;
-  padding: 10px 14px;
+  justify-self: end;
+  padding: 10px 20px;
   border-radius: 8px;
   background: var(--color-actions-primary-idle);
   color: var(--color-text-neutral-complementary-base);
