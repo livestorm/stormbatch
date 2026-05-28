@@ -2204,26 +2204,10 @@ body {
   transform: translateY(14px);
 }
 
-/* ── Source / target panel variants ──────────────── */
-
-.source-panel,
-.target-panel {
-  max-width: 780px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.centered-notice {
-  max-width: 780px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
 /* ── Step navigation buttons ──────────────────────── */
 
 .step-nav {
-  max-width: 780px;
-  margin: 4px auto 0;
+  margin: 4px 0 0;
   display: flex;
   justify-content: flex-end;
 }
