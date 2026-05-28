@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import ApiKeyInput from "./components/ApiKeyInput.vue";
 import BetaInfoModal from "./components/BetaInfoModal.vue";
 import FileUpload from "./components/FileUpload.vue";
@@ -103,6 +103,7 @@ function setSourceMode(mode) {
   totalSessionCount.value = 0;
   createdSessionCount.value = 0;
   resetMessages();
+  resetSessionFieldsState();
 }
 
 // ── Upload mode state ──────────────────────────────────────────────────────────
@@ -112,6 +113,17 @@ const preview = ref(null);
 const columnSettings = ref([]);
 const duplicateEmails = ref([]);
 const isPreviewLoading = ref(false);
+
+// ── Field validation state ─────────────────────────────────────────────────────
+
+const sessionFieldsState = ref({
+  fields: [],
+  loading: false,
+  error: "",
+  validated: false,
+  hasPeople: false,
+  sessionId: "",
+});
 
 // ── Transfer mode state ────────────────────────────────────────────────────────
 
@@ -151,6 +163,9 @@ function goToStep(step) {
   if (!isAuthenticated.value) return;
   if (step === 3 && !sourceReady.value) return;
   currentStep.value = step;
+  if (step === 3 && sourceMode.value === "upload" && parsedSessionIds.value.length > 0 && !sessionFieldsState.value.validated && !sessionFieldsState.value.loading) {
+    validateSessionFields();
+  }
 }
 
 // Upload mode
@@ -218,6 +233,24 @@ const isReadyToSubmit = computed(() => {
     transferActiveRows.value.length > 0
   );
 });
+
+// ── Field validation computed ──────────────────────────────────────────────────
+
+const validFieldIds = computed(() => new Set(sessionFieldsState.value.fields.map((f) => f.id)));
+
+const hasInvalidIncludedMappings = computed(() => {
+  if (!sessionFieldsState.value.validated || !sessionFieldsState.value.hasPeople) return false;
+  const validIds = validFieldIds.value;
+  return Object.values(autoMapping.value).some(
+    (attrId) => attrId && attrId !== "email" && !validIds.has(attrId),
+  );
+});
+
+const canSubmit = computed(() => isReadyToSubmit.value && !hasInvalidIncludedMappings.value);
+
+function isFieldMapped(fieldId) {
+  return Object.values(autoMapping.value).includes(fieldId);
+}
 
 const finishedJobs = computed(
   () =>
@@ -338,6 +371,71 @@ const completionMessage = computed(() => {
 function resetMessages() {
   errorMessage.value = "";
   successMessage.value = "";
+}
+
+function resetSessionFieldsState() {
+  sessionFieldsState.value = {
+    fields: [],
+    loading: false,
+    error: "",
+    validated: false,
+    hasPeople: false,
+    sessionId: "",
+  };
+}
+
+async function validateSessionFields() {
+  const sessionId = parsedSessionIds.value[0];
+  if (!sessionId || sourceMode.value !== "upload") return;
+
+  sessionFieldsState.value = {
+    fields: [],
+    loading: true,
+    error: "",
+    validated: false,
+    hasPeople: false,
+    sessionId,
+  };
+
+  try {
+    const response = await fetch("/api/session-fields", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    const data = await readApiResponse(response, "Failed to fetch session fields");
+    if (!response.ok) throw new Error(data.detail || "Failed to fetch session fields");
+
+    sessionFieldsState.value = {
+      fields: data.fields || [],
+      loading: false,
+      error: "",
+      validated: true,
+      hasPeople: data.has_people,
+      sessionId,
+    };
+
+    // Auto-disable columns whose attribute ID does not exist in the session's form
+    if (data.has_people && data.fields?.length > 0) {
+      const validIds = new Set(data.fields.map((f) => f.id));
+      columnSettings.value = columnSettings.value.map((c) => {
+        if (c.attributeId === "email") return c;
+        if (c.include && c.attributeId && !validIds.has(c.attributeId.trim())) {
+          return { ...c, include: false };
+        }
+        return c;
+      });
+    }
+  } catch (error) {
+    sessionFieldsState.value = {
+      fields: [],
+      loading: false,
+      error: error.message,
+      validated: false,
+      hasPeople: false,
+      sessionId,
+    };
+  }
 }
 
 async function readApiResponse(response, fallbackMessage) {
@@ -573,6 +671,10 @@ async function submitRegistration() {
     errorMessage.value = "Included columns cannot use the same Livestorm field ID twice.";
     return;
   }
+  if (hasInvalidIncludedMappings.value) {
+    errorMessage.value = "Some mapped field IDs are not valid for this session. Go back to Source and fix or disable the invalid columns.";
+    return;
+  }
   if (!isAuthenticated.value) { errorMessage.value = "Please connect your Livestorm account first."; return; }
 
   isSubmitting.value = true;
@@ -756,8 +858,20 @@ function startNewBatch() {
   isSubmitting.value = false;
   isPreviewLoading.value = false;
   resetMessages();
+  resetSessionFieldsState();
   currentStep.value = 2;
 }
+
+watch(
+  () => parsedSessionIds.value[0],
+  (newId) => {
+    if (newId && sourceMode.value === "upload" && preview.value) {
+      validateSessionFields();
+    } else if (!newId) {
+      resetSessionFieldsState();
+    }
+  },
+);
 </script>
 
 <template>
@@ -992,6 +1106,83 @@ function startNewBatch() {
         <SessionIdsInput v-model="sessionIds" />
       </div>
 
+      <!-- ── Attribute Mapping Check (upload mode only) ──────────────────────── -->
+
+      <section v-if="sourceMode === 'upload' && preview" class="panel mapping-check-panel">
+        <div class="panel-header">
+          <div>
+            <span class="step-label">Attribute Mapping Check</span>
+            <h2>Field compatibility</h2>
+            <p v-if="sessionFieldsState.loading">Checking field compatibility…</p>
+            <p v-else-if="!parsedSessionIds.length">Enter a target session ID above to validate your field mapping.</p>
+            <p v-else-if="sessionFieldsState.validated && sessionFieldsState.hasPeople">
+              Validated against session <code class="inline-code">{{ sessionFieldsState.sessionId }}</code>
+            </p>
+            <p v-else-if="sessionFieldsState.validated && !sessionFieldsState.hasPeople">No registrants found — field names could not be auto-checked.</p>
+            <p v-else>Validate your column names match the session's registration form fields.</p>
+          </div>
+          <button
+            class="bar-btn"
+            type="button"
+            :disabled="!parsedSessionIds.length || sessionFieldsState.loading"
+            @click="validateSessionFields">
+            {{ sessionFieldsState.loading ? 'Checking…' : sessionFieldsState.validated ? 'Re-check' : 'Check fields' }}
+          </button>
+        </div>
+
+        <div v-if="sessionFieldsState.error" class="notice error" style="margin-bottom: 0">{{ sessionFieldsState.error }}</div>
+
+        <div v-if="sessionFieldsState.validated && !sessionFieldsState.hasPeople" class="notice warning" style="margin-bottom: 0">
+          No registrants found in session <code>{{ sessionFieldsState.sessionId }}</code>.
+          Field names could not be auto-validated — ensure your column IDs use underscore separators (e.g., <code>first_name</code>, <code>last_name</code>).
+        </div>
+
+        <template v-if="sessionFieldsState.validated && sessionFieldsState.hasPeople">
+          <div class="mapping-check-list">
+            <div
+              v-for="item in columnSettings"
+              :key="item.column"
+              class="mapping-check-row"
+              :class="{
+                'check-valid': item.include && (item.attributeId === 'email' || validFieldIds.has(item.attributeId)),
+                'check-invalid': item.include && item.attributeId !== 'email' && !validFieldIds.has(item.attributeId),
+                'check-dropped': !item.include,
+              }">
+              <span class="check-icon">
+                <svg v-if="item.include && (item.attributeId === 'email' || validFieldIds.has(item.attributeId))" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg v-else-if="item.include" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </span>
+              <span class="check-column">{{ item.column }}</span>
+              <span class="check-arrow">→</span>
+              <code class="check-attr">{{ item.attributeId || '—' }}</code>
+              <span class="check-status">
+                <template v-if="!item.include">Dropped</template>
+                <template v-else-if="item.attributeId === 'email'">Required</template>
+                <template v-else-if="validFieldIds.has(item.attributeId)">Valid</template>
+                <template v-else>Invalid — auto-disabled</template>
+              </span>
+            </div>
+          </div>
+
+          <div class="available-fields-block">
+            <span class="available-fields-label">Fields available in this session</span>
+            <div class="available-fields-list">
+              <span
+                v-for="field in sessionFieldsState.fields"
+                :key="field.id"
+                class="session-field-chip"
+                :class="{
+                  'chip-required': field.required,
+                  'chip-mapped': isFieldMapped(field.id),
+                }">
+                {{ field.id }}<em v-if="field.required"> · req.</em>
+              </span>
+            </div>
+          </div>
+        </template>
+      </section>
+
       <section v-if="errorMessage" class="notice error centered-notice">{{ errorMessage }}</section>
       <section v-if="successMessage" class="notice success centered-notice">{{ successMessage }}</section>
 
@@ -1004,9 +1195,12 @@ function startNewBatch() {
           <p v-else>
             {{ transferActiveRows.length }} registrant(s) will be transferred to {{ parsedSessionIds.length }} session(s) in batches of {{ BULK_JOB_CHUNK_SIZE }}.
           </p>
+          <p v-if="hasInvalidIncludedMappings" class="invalid-mapping-warning">
+            Some columns are mapped to unknown field IDs. Go back to source and fix or disable them before registering.
+          </p>
         </div>
         <div class="cta-actions">
-          <button class="primary-button" :disabled="isSubmitting || isPollingJobs" @click="handleSubmit">
+          <button class="primary-button" :disabled="isSubmitting || isPollingJobs || !canSubmit" @click="handleSubmit">
             {{ isSubmitting ? (sourceMode === "transfer" ? "Transferring…" : "Creating jobs…") : (sourceMode === "transfer" ? "Transfer now" : "Batch register now") }}
           </button>
         </div>
@@ -2147,5 +2341,158 @@ body {
   .step-track {
     margin-bottom: 20px;
   }
+}
+
+/* ── Attribute mapping check panel ─────────────────── */
+
+.notice.warning {
+  background: var(--color-surface-warning-300);
+  color: var(--color-text-warning-secondary);
+  border: 1px solid var(--color-borders-warning-light);
+}
+
+.inline-code {
+  font-family: ui-monospace, "SFMono-Regular", monospace;
+  font-size: 0.85em;
+  background: var(--color-surface-neutral-300);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.mapping-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 20px;
+}
+
+.mapping-check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-borders-neutral-light);
+  background: var(--color-surface-neutral-100);
+  font-size: var(--text-content-text-regular-md, 14px);
+}
+
+.mapping-check-row.check-valid {
+  border-color: var(--color-borders-success-light);
+  background: var(--color-surface-success-300);
+}
+
+.mapping-check-row.check-invalid {
+  border-color: var(--color-borders-danger-light);
+  background: var(--color-surface-danger-300);
+}
+
+.mapping-check-row.check-dropped {
+  opacity: 0.45;
+}
+
+.check-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  width: 16px;
+}
+
+.check-valid .check-icon { color: var(--color-actions-success-idle); }
+.check-invalid .check-icon { color: var(--color-text-danger-secondary); }
+.check-dropped .check-icon { color: var(--color-text-neutral-tertiary); }
+
+.check-column {
+  font-weight: 600;
+  color: var(--color-text-neutral-base);
+  min-width: 80px;
+  flex-shrink: 0;
+}
+
+.check-arrow {
+  color: var(--color-text-neutral-tertiary);
+  flex-shrink: 0;
+}
+
+.check-attr {
+  font-family: ui-monospace, "SFMono-Regular", monospace;
+  font-size: 0.875em;
+  flex: 1;
+  color: var(--color-text-neutral-base);
+  word-break: break-all;
+}
+
+.check-status {
+  font-size: var(--text-content-legends-regular-md);
+  color: var(--color-text-neutral-secondary);
+  flex-shrink: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.check-valid .check-status { color: var(--color-text-success-secondary); }
+.check-invalid .check-status { color: var(--color-text-danger-secondary); font-weight: 600; }
+
+/* ── Available session fields ─────────────────────── */
+
+.available-fields-block {
+  border-top: 1px solid var(--color-borders-neutral-light);
+  padding-top: 16px;
+  margin-top: 4px;
+}
+
+.available-fields-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-legends-bold-md);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.available-fields-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.session-field-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--color-surface-neutral-300);
+  border: 1px solid var(--color-borders-neutral-light);
+  font-family: ui-monospace, "SFMono-Regular", monospace;
+  font-size: 12px;
+  color: var(--color-text-neutral-base);
+}
+
+.session-field-chip.chip-required {
+  border-color: var(--color-borders-primary-light);
+  background: var(--color-actions-primary-idle-alpha-light);
+  color: var(--color-actions-primary-idle);
+}
+
+.session-field-chip.chip-mapped {
+  border-color: var(--color-borders-success-light);
+  background: var(--color-surface-success-300);
+  color: var(--color-text-success-secondary);
+}
+
+.session-field-chip em {
+  font-style: normal;
+  opacity: 0.65;
+  font-size: 10px;
+}
+
+/* ── Invalid mapping warning in CTA ─────────────────── */
+
+.invalid-mapping-warning {
+  margin-top: 8px !important;
+  color: var(--color-text-danger-secondary) !important;
+  font-size: var(--text-content-legends-regular-md) !important;
 }
 </style>
