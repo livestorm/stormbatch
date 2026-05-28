@@ -252,6 +252,15 @@ function isFieldMapped(fieldId) {
   return Object.values(autoMapping.value).includes(fieldId);
 }
 
+function onCheckAttrChange(idx, value) {
+  const trimmed = value.trim();
+  const isNowValid = trimmed === "email" || validFieldIds.value.has(trimmed);
+  updateColumnSetting(idx, {
+    attributeId: trimmed,
+    ...(isNowValid ? { include: true } : {}),
+  });
+}
+
 const finishedJobs = computed(
   () =>
     jobs.value.filter((j) =>
@@ -1140,7 +1149,7 @@ watch(
         <template v-if="sessionFieldsState.validated && sessionFieldsState.hasPeople">
           <div class="mapping-check-list">
             <div
-              v-for="item in columnSettings"
+              v-for="(item, idx) in columnSettings"
               :key="item.column"
               class="mapping-check-row"
               :class="{
@@ -1155,9 +1164,17 @@ watch(
               </span>
               <span class="check-column">{{ item.column }}</span>
               <span class="check-arrow">→</span>
-              <code class="check-attr">{{ item.attributeId || '—' }}</code>
+              <input
+                v-if="item.attributeId !== 'email'"
+                class="check-attr-input"
+                :value="item.attributeId"
+                placeholder="field_id"
+                :title="!item.include ? 'Edit to correct the slug and re-enable this field' : 'Edit field ID'"
+                @change="onCheckAttrChange(idx, $event.target.value)"
+              />
+              <code v-else class="check-attr">{{ item.attributeId }}</code>
               <span class="check-status">
-                <template v-if="!item.include">Dropped</template>
+                <template v-if="!item.include">Dropped — edit to fix</template>
                 <template v-else-if="item.attributeId === 'email'">Required</template>
                 <template v-else-if="validFieldIds.has(item.attributeId)">Valid</template>
                 <template v-else>Invalid — auto-disabled</template>
@@ -2420,6 +2437,43 @@ body {
   flex: 1;
   color: var(--color-text-neutral-base);
   word-break: break-all;
+}
+
+.check-attr-input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, "SFMono-Regular", monospace;
+  font-size: 0.875em;
+  color: var(--color-text-neutral-base);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--color-borders-neutral-default);
+  border-radius: 0;
+  padding: 1px 2px;
+  outline: none;
+  word-break: break-all;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.check-attr-input:focus {
+  border-bottom-color: var(--color-borders-primary-strong);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px 4px 0 0;
+}
+
+.check-attr-input::placeholder {
+  color: var(--color-text-neutral-tertiary);
+  font-style: italic;
+}
+
+.check-invalid .check-attr-input {
+  border-bottom-color: var(--color-borders-danger-light);
+  color: var(--color-text-danger-secondary);
+}
+
+.check-dropped .check-attr-input {
+  border-bottom-style: dashed;
+  opacity: 1;
 }
 
 .check-status {
