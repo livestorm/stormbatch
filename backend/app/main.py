@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.routes.auth import router as auth_router
+from app.routes.contacts import router as contacts_router
 from app.routes.jobs import router as jobs_router
 from app.routes.preview import router as preview_router
 from app.routes.registration import router as registration_router
@@ -39,6 +40,7 @@ app.include_router(registration_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 app.include_router(transfer_router, prefix="/api")
 app.include_router(validation_router, prefix="/api")
+app.include_router(contacts_router, prefix="/api")
 
 
 @app.get("/health")

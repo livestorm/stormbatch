@@ -13,6 +13,8 @@ const showBetaInfo = ref(false);
 
 const BULK_JOB_CHUNK_SIZE = 50;
 const JOB_STATUS_POLL_INTERVAL_MS = 5000;
+// 0.25 s between contact updates → 4 req/s, safely under Livestorm's 5 req/s burst limit.
+const CONTACT_UPDATE_DELAY_MS = 250;
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
 
@@ -83,7 +85,7 @@ onMounted(() => {
 
 // ── Source mode ────────────────────────────────────────────────────────────────
 
-const sourceMode = ref("upload"); // "upload" | "transfer"
+const sourceMode = ref("upload"); // "upload" | "transfer" | "contacts"
 
 function setSourceMode(mode) {
   if (mode === sourceMode.value) return;
@@ -102,6 +104,7 @@ function setSourceMode(mode) {
   rowResults.value = [];
   totalSessionCount.value = 0;
   createdSessionCount.value = 0;
+  resetContactsState();
   resetMessages();
   resetSessionFieldsState();
 }
@@ -133,6 +136,15 @@ const transferExcludedRows = ref({}); // { [rowIndex]: true }
 const transferIncludedFields = ref([]); // field IDs to send
 const isSourceLoading = ref(false);
 
+// ── Contact update mode state ──────────────────────────────────────────────────
+
+const contactsSessionId = ref("");
+const contactsData = ref(null); // { session_id, headers, people: [{ id, fields }], total }
+const contactDrafts = ref({}); // { [personId]: { fieldId: value } }
+const contactSaveStates = ref({}); // { [personId]: { saving?, saved?, error? } }
+const isContactsLoading = ref(false);
+const isSavingAllContacts = ref(false);
+
 // ── Shared state ───────────────────────────────────────────────────────────────
 
 const sessionIds = ref([]);
@@ -154,9 +166,11 @@ const parsedSessionIds = computed(() => sessionIds.value);
 
 const currentStep = ref(1); // 1 = Connect, 2 = Source, 3 = Target
 
-const sourceReady = computed(() =>
-  sourceMode.value === "upload" ? Boolean(preview.value) : Boolean(transferData.value),
-);
+const sourceReady = computed(() => {
+  if (sourceMode.value === "upload") return Boolean(preview.value);
+  if (sourceMode.value === "transfer") return Boolean(transferData.value);
+  return false; // contacts mode is self-contained — no target step
+});
 
 function goToStep(step) {
   if (step === 1) return;
@@ -200,6 +214,41 @@ const transferActiveRows = computed(() => {
 
 const transferExcludedCount = computed(
   () => Object.keys(transferExcludedRows.value).length,
+);
+
+// Contact update mode
+const editableContactHeaders = computed(() =>
+  contactsData.value ? contactsData.value.headers.filter((h) => h !== "email") : [],
+);
+
+function isContactDirty(person) {
+  const draft = contactDrafts.value[person.id];
+  if (!draft) return false;
+  return editableContactHeaders.value.some(
+    (fid) => (draft[fid] ?? "") !== (person.fields[fid] ?? ""),
+  );
+}
+
+function isContactFieldChanged(person, fieldId) {
+  const draft = contactDrafts.value[person.id];
+  if (!draft) return false;
+  return (draft[fieldId] ?? "") !== (person.fields[fieldId] ?? "");
+}
+
+const dirtyContactCount = computed(() =>
+  contactsData.value ? contactsData.value.people.filter(isContactDirty).length : 0,
+);
+
+const contactsWithErrors = computed(() =>
+  contactsData.value
+    ? contactsData.value.people.filter((p) => contactSaveStates.value[p.id]?.error)
+    : [],
+);
+
+const savedContactCount = computed(() =>
+  contactsData.value
+    ? contactsData.value.people.filter((p) => contactSaveStates.value[p.id]?.saved).length
+    : 0,
 );
 
 // Shared / progress
@@ -578,6 +627,123 @@ function restoreTransferRow(index) {
   transferExcludedRows.value = next;
 }
 
+// ── Contact update mode handlers ───────────────────────────────────────────────
+
+function resetContactsState() {
+  contactsSessionId.value = "";
+  contactsData.value = null;
+  contactDrafts.value = {};
+  contactSaveStates.value = {};
+  isContactsLoading.value = false;
+  isSavingAllContacts.value = false;
+}
+
+async function fetchContacts() {
+  if (!contactsSessionId.value.trim()) {
+    errorMessage.value = "Enter a session ID.";
+    return;
+  }
+  if (!isAuthenticated.value) {
+    errorMessage.value = "Please connect your Livestorm account first.";
+    return;
+  }
+  resetMessages();
+  isContactsLoading.value = true;
+  contactsData.value = null;
+  contactDrafts.value = {};
+  contactSaveStates.value = {};
+
+  try {
+    const response = await fetch("/api/session-contacts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: contactsSessionId.value.trim() }),
+    });
+    const data = await readApiResponse(
+      response,
+      "Failed to fetch contacts. The server returned an empty or invalid response.",
+    );
+    if (!response.ok) throw new Error(data.detail || "Failed to fetch contacts.");
+    contactsData.value = data;
+    contactDrafts.value = Object.fromEntries(
+      data.people.map((p) => [p.id, { ...p.fields }]),
+    );
+  } catch (error) {
+    errorMessage.value = error.message;
+  } finally {
+    isContactsLoading.value = false;
+  }
+}
+
+function onContactFieldInput(personId, fieldId, value) {
+  contactDrafts.value = {
+    ...contactDrafts.value,
+    [personId]: { ...contactDrafts.value[personId], [fieldId]: value },
+  };
+  if (contactSaveStates.value[personId]) {
+    contactSaveStates.value = { ...contactSaveStates.value, [personId]: {} };
+  }
+}
+
+function resetContactRow(person) {
+  contactDrafts.value = { ...contactDrafts.value, [person.id]: { ...person.fields } };
+  contactSaveStates.value = { ...contactSaveStates.value, [person.id]: {} };
+}
+
+async function saveContact(person) {
+  const draft = contactDrafts.value[person.id] || {};
+  const changedFields = editableContactHeaders.value
+    .filter((fid) => (draft[fid] ?? "") !== (person.fields[fid] ?? ""))
+    .map((fid) => ({ id: fid, value: (draft[fid] ?? "").trim() }));
+  if (!changedFields.length) return;
+
+  contactSaveStates.value = { ...contactSaveStates.value, [person.id]: { saving: true } };
+
+  try {
+    const response = await fetch("/api/update-contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: contactsData.value.session_id,
+        person_id: person.id,
+        email: person.fields.email || "",
+        fields: changedFields,
+      }),
+    });
+    const data = await readApiResponse(
+      response,
+      "Update failed. The server returned an empty or invalid response.",
+    );
+    if (!response.ok) throw new Error(data.detail || "Update failed.");
+
+    person.fields = {
+      ...person.fields,
+      ...Object.fromEntries(changedFields.map((f) => [f.id, f.value])),
+    };
+    contactDrafts.value = { ...contactDrafts.value, [person.id]: { ...person.fields } };
+    contactSaveStates.value = { ...contactSaveStates.value, [person.id]: { saved: true } };
+  } catch (error) {
+    contactSaveStates.value = {
+      ...contactSaveStates.value,
+      [person.id]: { error: error.message },
+    };
+  }
+}
+
+async function saveAllContacts() {
+  if (!contactsData.value || isSavingAllContacts.value) return;
+  isSavingAllContacts.value = true;
+  try {
+    for (const person of contactsData.value.people) {
+      if (!isContactDirty(person)) continue;
+      await saveContact(person);
+      await wait(CONTACT_UPDATE_DELAY_MS);
+    }
+  } finally {
+    isSavingAllContacts.value = false;
+  }
+}
+
 // ── Job lifecycle ──────────────────────────────────────────────────────────────
 
 function attachRowResults(tasks, job) {
@@ -858,6 +1024,7 @@ function startNewBatch() {
   transferExcludedRows.value = {};
   transferIncludedFields.value = [];
   isSourceLoading.value = false;
+  resetContactsState();
   jobs.value = [];
   rowResults.value = [];
   hasSubmittedJobs.value = false;
@@ -926,17 +1093,19 @@ watch(
         </div>
         <span class="step-lbl">Source</span>
       </div>
-      <div class="step-conn" :class="{ done: currentStep === 3 }"></div>
-      <div
-        class="step-item"
-        :class="{ active: currentStep === 3, locked: !isAuthenticated || !sourceReady, 'can-navigate': isAuthenticated && sourceReady }"
-        @click="goToStep(3)"
-      >
-        <div class="step-circ">
-          <span>3</span>
+      <template v-if="sourceMode !== 'contacts'">
+        <div class="step-conn" :class="{ done: currentStep === 3 }"></div>
+        <div
+          class="step-item"
+          :class="{ active: currentStep === 3, locked: !isAuthenticated || !sourceReady, 'can-navigate': isAuthenticated && sourceReady }"
+          @click="goToStep(3)"
+        >
+          <div class="step-circ">
+            <span>3</span>
+          </div>
+          <span class="step-lbl">Target</span>
         </div>
-        <span class="step-lbl">Target</span>
-      </div>
+      </template>
     </div>
 
     <!-- ── Step 1: Onboarding (not connected) ────────────────────────────────── -->
@@ -966,6 +1135,10 @@ watch(
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
             Register to multiple target sessions at once
           </li>
+          <li>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+            Edit contact details directly in a session
+          </li>
         </ul>
         <button class="primary-button onboarding-cta" type="button" @click="handleLogin">
           <img :src="livestormIcon" alt="" class="bar-btn-icon" />
@@ -984,6 +1157,7 @@ watch(
         <div class="mode-toggle" role="group" aria-label="Source type">
           <button :class="['mode-btn', { active: sourceMode === 'upload' }]" type="button" @click="setSourceMode('upload')">Upload file</button>
           <button :class="['mode-btn', { active: sourceMode === 'transfer' }]" type="button" @click="setSourceMode('transfer')">Transfer from session</button>
+          <button :class="['mode-btn', { active: sourceMode === 'contacts' }]" type="button" @click="setSourceMode('contacts')">Update contacts</button>
         </div>
 
         <FileUpload
@@ -995,11 +1169,21 @@ watch(
           @preview="loadPreview"
         />
         <SourceSessionInput
-          v-else
+          v-else-if="sourceMode === 'transfer'"
           v-model="sourceSessionId"
           :loading="isSourceLoading"
           :fetched-count="transferData ? transferData.total : null"
           @fetch="fetchSourceRegistrants"
+        />
+        <SourceSessionInput
+          v-else
+          v-model="contactsSessionId"
+          label="Session ID"
+          button-label="Fetch contacts"
+          fetched-noun="contact"
+          :loading="isContactsLoading"
+          :fetched-count="contactsData ? contactsData.total : null"
+          @fetch="fetchContacts"
         />
       </div>
 
@@ -1090,6 +1274,92 @@ watch(
               </tr>
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- Contacts: inline editor -->
+      <section v-if="sourceMode === 'contacts' && contactsData" class="panel preview-panel">
+        <div class="panel-header">
+          <div>
+            <span class="step-label">Contacts</span>
+            <h2>{{ contactsData.total }} contact{{ contactsData.total === 1 ? "" : "s" }}</h2>
+            <p class="source-session-id">in session {{ contactsData.session_id }}</p>
+          </div>
+          <div class="preview-statuses">
+            <div v-if="savedContactCount" class="status-pill ok">{{ savedContactCount }} saved</div>
+            <div v-if="dirtyContactCount" class="warning-pill">
+              {{ dirtyContactCount }} unsaved change{{ dirtyContactCount === 1 ? "" : "s" }}
+            </div>
+            <button
+              class="bar-btn primary"
+              type="button"
+              :disabled="!dirtyContactCount || isSavingAllContacts"
+              @click="saveAllContacts"
+            >
+              {{ isSavingAllContacts ? "Saving…" : "Save all changes" }}
+            </button>
+          </div>
+        </div>
+
+        <p class="contacts-hint">
+          Click a value to edit it, then save the row. Email is protected by Livestorm and can't be changed.
+        </p>
+
+        <div class="registrant-table-wrap">
+          <table class="registrant-table contacts-table">
+            <thead>
+              <tr>
+                <th v-for="field in contactsData.headers" :key="field">
+                  {{ field }}<span v-if="field === 'email'" class="th-lock">read-only</span>
+                </th>
+                <th class="save-th"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="person in contactsData.people"
+                :key="person.id"
+                :class="{
+                  'row-dirty': isContactDirty(person),
+                  'row-save-error': contactSaveStates[person.id]?.error,
+                }"
+              >
+                <td v-for="field in contactsData.headers" :key="field" class="contact-cell">
+                  <span v-if="field === 'email'" class="contact-email">{{ person.fields.email }}</span>
+                  <input
+                    v-else
+                    class="contact-input"
+                    :class="{ changed: isContactFieldChanged(person, field) }"
+                    :value="(contactDrafts[person.id] || {})[field] ?? ''"
+                    placeholder="—"
+                    :disabled="contactSaveStates[person.id]?.saving || isSavingAllContacts"
+                    @input="onContactFieldInput(person.id, field, $event.target.value)"
+                  />
+                </td>
+                <td class="save-td">
+                  <div class="save-actions">
+                    <span v-if="contactSaveStates[person.id]?.saving" class="save-status">Saving…</span>
+                    <template v-else-if="isContactDirty(person)">
+                      <button class="row-save-btn" type="button" @click="saveContact(person)">
+                        {{ contactSaveStates[person.id]?.error ? "Retry" : "Save" }}
+                      </button>
+                      <button class="row-action-btn restore" type="button" title="Discard changes" @click="resetContactRow(person)">↩</button>
+                    </template>
+                    <span v-else-if="contactSaveStates[person.id]?.saved" class="save-status saved">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                      Saved
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div v-if="contactsWithErrors.length" class="contact-errors">
+          <div v-for="person in contactsWithErrors" :key="person.id" class="notice error contact-error-item">
+            <strong>{{ person.fields.email }}</strong> — {{ contactSaveStates[person.id].error }}
+          </div>
         </div>
       </section>
 
@@ -1562,7 +1832,7 @@ body {
 
 .mode-toggle {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 3px;
   padding: 3px;
   border-radius: 10px;
@@ -1893,6 +2163,144 @@ body {
 .row-action-btn.restore:hover {
   background: var(--color-surface-primary-100);
   border-color: var(--color-borders-primary-light);
+}
+
+/* ── Contact update editor ────────────────────────── */
+
+.contacts-hint {
+  margin: -8px 0 16px;
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-legends-regular-md);
+  line-height: var(--text-content-legends-regular-md--line-height);
+}
+
+.th-lock {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-surface-neutral-300);
+  border: 1px solid var(--color-borders-neutral-light);
+  color: var(--color-text-neutral-tertiary);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.contacts-table .contact-cell {
+  padding: 4px 8px;
+}
+
+.contact-email {
+  display: block;
+  padding: 5px 6px;
+  color: var(--color-text-neutral-secondary);
+  font-family: ui-monospace, "SFMono-Regular", monospace;
+  font-size: 0.9em;
+}
+
+.contact-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 110px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-neutral-base);
+  font-size: inherit;
+  font-family: inherit;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.contact-input:hover:not(:disabled) {
+  border-color: var(--color-borders-neutral-light);
+}
+
+.contact-input:focus {
+  outline: none;
+  border-color: var(--color-borders-primary-strong);
+  background: var(--color-surface-neutral-100);
+}
+
+.contact-input:disabled {
+  opacity: 0.6;
+}
+
+.contact-input.changed {
+  border-color: var(--color-borders-warning-light);
+  background: var(--color-surface-warning-300);
+  color: var(--color-text-warning-secondary);
+  font-weight: 600;
+}
+
+.contact-input::placeholder {
+  color: var(--color-text-neutral-tertiary);
+}
+
+.contacts-table tbody tr.row-dirty {
+  background: var(--color-actions-neutral-hover-overlay);
+}
+
+.contacts-table tbody tr.row-save-error {
+  background: var(--color-surface-danger-300);
+}
+
+.save-th,
+.save-td {
+  width: 110px;
+  min-width: 110px;
+  padding: 4px 10px !important;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.save-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.row-save-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: none;
+  background: var(--color-actions-primary-idle);
+  color: var(--color-text-neutral-complementary-base);
+  font-size: var(--text-content-legends-bold-md);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.row-save-btn:hover {
+  background: var(--color-actions-primary-idle-alpha-strong);
+}
+
+.save-status {
+  color: var(--color-text-neutral-tertiary);
+  font-size: var(--text-content-legends-regular-md);
+}
+
+.save-status.saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-success-secondary);
+  font-weight: 600;
+}
+
+.contact-errors {
+  margin-top: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.contact-error-item {
+  margin: 0;
+  padding: 10px 14px;
 }
 
 /* ── CTA card ─────────────────────────────────────── */

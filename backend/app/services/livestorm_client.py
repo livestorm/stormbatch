@@ -7,6 +7,9 @@ import httpx
 import re
 
 _MAX_RETRIES = 3
+# The people PATCH endpoint applies updates quickly but rarely completes its response;
+# fail fast and fall back to verifying the write with a re-read.
+_PATCH_RESPONSE_TIMEOUT_SECONDS = 8
 
 
 class LivestormAPIError(Exception):
@@ -101,6 +104,80 @@ class LivestormClient:
             "status": "succeeded",
             "raw": data,
         }
+
+    async def update_session_person(
+        self,
+        session_id: str,
+        person_id: str,
+        fields: list[dict],
+        verify_email: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Update a contact's registration fields. Email is protected and rejected upstream.
+
+        The Livestorm PATCH endpoint currently applies the update within seconds but
+        often never completes the HTTP response (the connection hangs until the server
+        502s). We therefore use a short timeout and, when it fires, confirm the update
+        by re-reading the contact and comparing field values.
+        """
+        payload = {
+            "data": {
+                "type": "people",
+                "attributes": {
+                    "fields": fields,
+                },
+            }
+        }
+        try:
+            response = await self._request(
+                "PATCH",
+                f"/v1/sessions/{session_id}/people/{person_id}",
+                json=payload,
+                headers={
+                    "Accept": "application/vnd.api+json",
+                    "Content-Type": "application/vnd.api+json",
+                },
+                timeout=_PATCH_RESPONSE_TIMEOUT_SECONDS,
+            )
+        except httpx.TimeoutException:
+            if verify_email and await self._person_fields_match(session_id, verify_email, fields):
+                return {"status": "updated", "confirmed_by_reread": True}
+            raise LivestormAPIError(
+                "Livestorm did not confirm the update. Refresh the contact list to "
+                "check whether the change was applied."
+            )
+        if response.status_code == 403:
+            raise LivestormAPIError(
+                "Livestorm refused the update (403). The connected account may not "
+                "have permission to edit contacts in this workspace."
+            )
+        if response.status_code == 404:
+            raise LivestormAPIError("Contact not found in this session (404).")
+        data = self._handle_response(response, "Livestorm contact update failed")
+        return {"status": "updated", "raw": data}
+
+    async def _person_fields_match(
+        self, session_id: str, email: str, fields: list[dict]
+    ) -> bool:
+        """Re-read a contact by email and check every requested field value was applied."""
+        # Give Livestorm a moment to finish the write before re-reading.
+        await asyncio.sleep(1.0)
+        try:
+            people = await self.list_session_people(session_id=session_id, email=email)
+        except LivestormAPIError:
+            return False
+        if not people:
+            return False
+        current = {
+            str(f.get("id")): str(f.get("value") or "").strip()
+            for f in people[0]
+            .get("attributes", {})
+            .get("registrant_detail", {})
+            .get("fields", [])
+        }
+        return all(
+            current.get(str(f["id"])) == str(f.get("value") or "").strip()
+            for f in fields
+        )
 
     async def get_job_status(self, session_id: str, job_id: str) -> dict[str, Any]:
         response = await self._request("GET", f"/v1/jobs/{job_id}")

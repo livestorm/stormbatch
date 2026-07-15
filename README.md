@@ -1,6 +1,6 @@
 # StormBatch
 
-StormBatch is a simple local MVP for bulk-registering people from a spreadsheet into one or more Livestorm sessions.
+StormBatch is a simple local MVP for bulk-registering people from a spreadsheet into one or more Livestorm sessions. It can also transfer registrants between sessions and edit contact details of a session's registrants in place.
 
 ## Stack
 
@@ -39,6 +39,8 @@ Open `http://localhost:5173`.
 - The frontend polls `/api/job-status` every 2.5 seconds after the jobs are created.
 - Job polling uses Livestorm's documented endpoints: `GET /v1/jobs/{id}` and `GET /v1/jobs/{id}/tasks`.
 - Email is the only mandatory field for Livestorm API registrations. Extra mapped fields are optional prefill data; attendees can complete other required event fields later before joining.
+- The "Update contacts" source mode fetches a session's registrants (`GET /v1/sessions/{id}/people`) and edits them via `PATCH /v1/sessions/{id}/people/{id}`. Email is protected by Livestorm and shown read-only.
+- Livestorm's people PATCH endpoint currently applies the update but often never completes the HTTP response. The backend uses a short timeout and then confirms the write by re-reading the contact and comparing field values (`update_session_person` in `livestorm_client.py`).
 
 ## Deploy on Render
 

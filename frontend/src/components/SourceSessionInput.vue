@@ -12,6 +12,18 @@ defineProps({
     type: Number,
     default: null,
   },
+  label: {
+    type: String,
+    default: "Source session ID",
+  },
+  buttonLabel: {
+    type: String,
+    default: "Fetch registrants",
+  },
+  fetchedNoun: {
+    type: String,
+    default: "registrant",
+  },
 });
 
 defineEmits(["update:modelValue", "fetch"]);
@@ -19,7 +31,7 @@ defineEmits(["update:modelValue", "fetch"]);
 
 <template>
   <div class="source-session-block">
-    <label class="source-label">Source session ID</label>
+    <label class="source-label">{{ label }}</label>
     <div class="source-input-row">
       <input
         :value="modelValue"
@@ -35,12 +47,12 @@ defineEmits(["update:modelValue", "fetch"]);
         :disabled="loading || !modelValue.trim()"
         @click="$emit('fetch')"
       >
-        {{ loading ? "Fetching…" : "Fetch registrants" }}
+        {{ loading ? "Fetching…" : buttonLabel }}
       </button>
     </div>
     <div v-if="fetchedCount !== null" class="fetch-badge">
       <span class="dot"></span>
-      {{ fetchedCount }} registrant{{ fetchedCount === 1 ? "" : "s" }} found
+      {{ fetchedCount }} {{ fetchedNoun }}{{ fetchedCount === 1 ? "" : "s" }} found
     </div>
   </div>
 </template>
