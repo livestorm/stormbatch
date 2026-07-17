@@ -496,7 +496,20 @@ async function validateSessionFields() {
   }
 }
 
+function handleSessionExpired() {
+  isAuthenticated.value = false;
+  userProfile.value = null;
+  currentStep.value = 1;
+  errorMessage.value = "Your Livestorm session has expired. Please reconnect your account.";
+}
+
 async function readApiResponse(response, fallbackMessage) {
+  if (response.status === 401) {
+    // The Livestorm token is gone or expired — send the user back to the
+    // connect screen instead of leaving them on a broken step.
+    handleSessionExpired();
+    throw new Error("Your Livestorm session has expired. Please reconnect your account.");
+  }
   const text = await response.text();
   if (!text.trim()) {
     if (!response.ok) throw new Error(fallbackMessage);
@@ -722,6 +735,50 @@ async function saveContact(person) {
     };
     contactDrafts.value = { ...contactDrafts.value, [person.id]: { ...person.fields } };
     contactSaveStates.value = { ...contactSaveStates.value, [person.id]: { saved: true } };
+  } catch (error) {
+    contactSaveStates.value = {
+      ...contactSaveStates.value,
+      [person.id]: { error: error.message },
+    };
+  }
+}
+
+function armDeleteContact(person) {
+  contactSaveStates.value = { ...contactSaveStates.value, [person.id]: { confirmDelete: true } };
+}
+
+function cancelDeleteContact(person) {
+  contactSaveStates.value = { ...contactSaveStates.value, [person.id]: {} };
+}
+
+async function deleteContact(person) {
+  contactSaveStates.value = { ...contactSaveStates.value, [person.id]: { deleting: true } };
+  try {
+    const response = await fetch("/api/delete-contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: contactsData.value.session_id,
+        person_id: person.id,
+      }),
+    });
+    const data = await readApiResponse(
+      response,
+      "Deletion failed. The server returned an empty or invalid response.",
+    );
+    if (!response.ok) throw new Error(data.detail || "Deletion failed.");
+
+    contactsData.value = {
+      ...contactsData.value,
+      people: contactsData.value.people.filter((p) => p.id !== person.id),
+      total: contactsData.value.total - 1,
+    };
+    const drafts = { ...contactDrafts.value };
+    delete drafts[person.id];
+    contactDrafts.value = drafts;
+    const states = { ...contactSaveStates.value };
+    delete states[person.id];
+    contactSaveStates.value = states;
   } catch (error) {
     contactSaveStates.value = {
       ...contactSaveStates.value,
@@ -1140,6 +1197,7 @@ watch(
             Edit contact details directly in a session
           </li>
         </ul>
+        <div v-if="errorMessage" class="notice error onboarding-error">{{ errorMessage }}</div>
         <button class="primary-button onboarding-cta" type="button" @click="handleLogin">
           <img :src="livestormIcon" alt="" class="bar-btn-icon" />
           Connect with Livestorm
@@ -1303,12 +1361,14 @@ watch(
 
         <p class="contacts-hint">
           Click a value to edit it, then save the row. Email is protected by Livestorm and can't be changed.
+          Deleting a contact unregisters them from this session permanently.
         </p>
 
         <div class="registrant-table-wrap">
           <table class="registrant-table contacts-table">
             <thead>
               <tr>
+                <th class="del-th"></th>
                 <th v-for="field in contactsData.headers" :key="field">
                   {{ field }}<span v-if="field === 'email'" class="th-lock">read-only</span>
                 </th>
@@ -1322,8 +1382,24 @@ watch(
                 :class="{
                   'row-dirty': isContactDirty(person),
                   'row-save-error': contactSaveStates[person.id]?.error,
+                  'row-confirm-delete': contactSaveStates[person.id]?.confirmDelete,
                 }"
               >
+                <td class="del-td">
+                  <span v-if="contactSaveStates[person.id]?.deleting" class="save-status">Deleting…</span>
+                  <div v-else-if="contactSaveStates[person.id]?.confirmDelete" class="delete-confirm">
+                    <button class="confirm-delete-btn" type="button" @click="deleteContact(person)">Delete</button>
+                    <button class="row-action-btn restore" type="button" title="Cancel" @click="cancelDeleteContact(person)">↩</button>
+                  </div>
+                  <button
+                    v-else
+                    class="row-action-btn remove"
+                    type="button"
+                    title="Unregister this contact from the session"
+                    :disabled="contactSaveStates[person.id]?.saving || isSavingAllContacts"
+                    @click="armDeleteContact(person)"
+                  >✕</button>
+                </td>
                 <td v-for="field in contactsData.headers" :key="field" class="contact-cell">
                   <span v-if="field === 'email'" class="contact-email">{{ person.fields.email }}</span>
                   <input
@@ -2292,6 +2368,45 @@ body {
   font-weight: 600;
 }
 
+.del-th,
+.del-td {
+  width: 36px;
+  min-width: 36px;
+  padding: 4px 8px !important;
+  white-space: nowrap;
+}
+
+.del-td .row-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.delete-confirm {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.confirm-delete-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: none;
+  background: var(--color-actions-danger-idle);
+  color: var(--color-text-neutral-complementary-base);
+  font-size: var(--text-content-legends-bold-md);
+  font-weight: var(--text-content-legends-bold-md--font-weight);
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.confirm-delete-btn:hover {
+  opacity: 0.85;
+}
+
+.contacts-table tbody tr.row-confirm-delete {
+  background: var(--color-surface-danger-300);
+}
+
 .contact-errors {
   margin-top: 14px;
   display: grid;
@@ -2571,6 +2686,10 @@ body {
 .onboarding-features li svg {
   color: var(--color-actions-success-idle);
   flex-shrink: 0;
+}
+
+.onboarding-error {
+  margin: 0;
 }
 
 .onboarding-cta {

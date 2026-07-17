@@ -13,7 +13,9 @@ _PATCH_RESPONSE_TIMEOUT_SECONDS = 8
 
 
 class LivestormAPIError(Exception):
-    pass
+    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class LivestormClient:
@@ -79,15 +81,18 @@ class LivestormClient:
         return {"job_id": str(job_id), "status": str(status)}
 
     async def register_person(self, session_id: str, fields: list[dict]) -> dict[str, Any]:
-        attributes = {
-            field["id"]: field.get("value", "")
-            for field in fields
-            if field.get("id") and field.get("value")
-        }
+        # Livestorm expects attributes.fields as a list of {id, value} objects,
+        # not a flat attribute map.
         payload = {
             "data": {
                 "type": "people",
-                "attributes": attributes,
+                "attributes": {
+                    "fields": [
+                        {"id": field["id"], "value": field.get("value", "")}
+                        for field in fields
+                        if field.get("id") and field.get("value")
+                    ],
+                },
             }
         }
         response = await self._request(
@@ -148,12 +153,32 @@ class LivestormClient:
         if response.status_code == 403:
             raise LivestormAPIError(
                 "Livestorm refused the update (403). The connected account may not "
-                "have permission to edit contacts in this workspace."
+                "have permission to edit contacts in this workspace.",
+                status_code=403,
             )
         if response.status_code == 404:
-            raise LivestormAPIError("Contact not found in this session (404).")
+            raise LivestormAPIError("Contact not found in this session (404).", status_code=404)
         data = self._handle_response(response, "Livestorm contact update failed")
         return {"status": "updated", "raw": data}
+
+    async def delete_session_person(self, session_id: str, person_id: str) -> dict[str, str]:
+        """Unregister a contact from a session. Livestorm returns 204 on success."""
+        response = await self._request(
+            "DELETE",
+            f"/v1/sessions/{session_id}/people/{person_id}",
+            headers={"Accept": "application/vnd.api+json"},
+        )
+        if response.status_code == 403:
+            raise LivestormAPIError(
+                "Livestorm refused the deletion (403). The connected account may not "
+                "have permission to remove contacts in this workspace.",
+                status_code=403,
+            )
+        if response.status_code == 404:
+            raise LivestormAPIError("Contact not found in this session (404).", status_code=404)
+        if response.status_code >= 400:
+            raise self._build_error(response, "Livestorm contact deletion failed")
+        return {"status": "deleted"}
 
     async def _person_fields_match(
         self, session_id: str, email: str, fields: list[dict]
@@ -328,7 +353,7 @@ class LivestormClient:
                 detail = f"{fallback_message}: {message}"
         except Exception:
             pass
-        return LivestormAPIError(detail)
+        return LivestormAPIError(detail, status_code=response.status_code)
 
     def _friendly_error_message(self, message: str) -> str:
         missing_fields = re.findall(r"The field '([^']+)' doesn't exist", message)

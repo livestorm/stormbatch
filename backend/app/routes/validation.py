@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from app.routes.helpers import livestorm_error_to_http
 from app.services.livestorm_client import LivestormAPIError, LivestormClient
 
 router = APIRouter(tags=["validation"])
@@ -23,4 +24,4 @@ async def get_session_fields(request: Request, body: SessionFieldsRequest) -> di
             result = await client.get_session_fields(body.session_id)
         return {**result, "session_id": body.session_id}
     except LivestormAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise livestorm_error_to_http(request, exc) from exc

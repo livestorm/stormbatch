@@ -39,7 +39,8 @@ Open `http://localhost:5173`.
 - The frontend polls `/api/job-status` every 2.5 seconds after the jobs are created.
 - Job polling uses Livestorm's documented endpoints: `GET /v1/jobs/{id}` and `GET /v1/jobs/{id}/tasks`.
 - Email is the only mandatory field for Livestorm API registrations. Extra mapped fields are optional prefill data; attendees can complete other required event fields later before joining.
-- The "Update contacts" source mode fetches a session's registrants (`GET /v1/sessions/{id}/people`) and edits them via `PATCH /v1/sessions/{id}/people/{id}`. Email is protected by Livestorm and shown read-only.
+- The "Update contacts" source mode fetches a session's registrants (`GET /v1/sessions/{id}/people`), edits them via `PATCH /v1/sessions/{id}/people/{id}`, and can unregister them via `DELETE /v1/sessions/{id}/people/{id}` (two-step confirm in the UI).
+- When Livestorm answers 401 (expired OAuth token), the backend drops the stored token and the frontend logs the user out back to the connect screen with an explanation, instead of showing raw API errors.
 - Livestorm's people PATCH endpoint currently applies the update but often never completes the HTTP response. The backend uses a short timeout and then confirms the write by re-reading the contact and comparing field values (`update_session_person` in `livestorm_client.py`).
 
 ## Deploy on Render

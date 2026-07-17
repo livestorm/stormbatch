@@ -99,6 +99,43 @@ async def test_update_contact_roundtrip():
             assert restore["status"] == "updated"
 
 
+@needs_credentials
+async def test_delete_contact_roundtrip():
+    """
+    Register a throwaway participant, delete them via the DELETE endpoint,
+    then verify they are gone from the session.
+    """
+    from app.services.livestorm_client import LivestormAPIError, LivestormClient
+
+    throwaway_email = "fares.harrazi+deleteroundtrip@livestorm.co"
+
+    async with LivestormClient(token=LS_KEY, use_bearer=False) as client:
+        await client.register_person(
+            session_id=CONTACTS_SESSION_ID,
+            fields=[
+                {"id": "email", "value": throwaway_email},
+                {"id": "first_name", "value": "Delete"},
+                {"id": "last_name", "value": "Roundtrip"},
+            ],
+        )
+        created = await client.list_session_people(CONTACTS_SESSION_ID, email=throwaway_email)
+        assert created, "Throwaway participant was not registered"
+        person_id = created[0]["id"]
+
+        try:
+            result = await client.delete_session_person(
+                session_id=CONTACTS_SESSION_ID, person_id=person_id
+            )
+        except LivestormAPIError as exc:
+            if "403" in str(exc):
+                pytest.skip(f"API key lacks delete permission: {exc}")
+            raise
+
+        assert result["status"] == "deleted"
+        remaining = await client.list_session_people(CONTACTS_SESSION_ID, email=throwaway_email)
+        assert not remaining, "Participant still present after deletion"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 2. Route layer — FastAPI endpoints via TestClient
 # ══════════════════════════════════════════════════════════════════════════════
@@ -115,6 +152,23 @@ def test_update_contact_requires_auth(client):
         json={"session_id": CONTACTS_SESSION_ID, "person_id": "x", "fields": []},
     )
     assert response.status_code == 401
+
+
+def test_delete_contact_requires_auth(client):
+    response = client.post(
+        "/api/delete-contact",
+        json={"session_id": CONTACTS_SESSION_ID, "person_id": "x"},
+    )
+    assert response.status_code == 401
+
+
+def test_delete_contact_rejects_blank_ids(client, session_cookie):
+    response = client.post(
+        "/api/delete-contact",
+        json={"session_id": "  ", "person_id": ""},
+        cookies={"session": session_cookie},
+    )
+    assert response.status_code == 400
 
 
 def test_update_contact_rejects_email_only_update(client, session_cookie):

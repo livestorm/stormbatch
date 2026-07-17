@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from app.schemas.registration import RegisterResponse
 from app.services.excel_parser import parse_excel_upload
+from app.routes.helpers import livestorm_error_to_http
 from app.services.livestorm_client import LivestormAPIError, LivestormClient
 from app.services.mapping_service import normalize_session_ids, validate_mapping_and_rows
 from app.services.payload_builder import build_bulk_job_payload
@@ -93,4 +94,4 @@ async def register_people(
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail="Invalid mapping payload") from exc
     except LivestormAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise livestorm_error_to_http(request, exc) from exc

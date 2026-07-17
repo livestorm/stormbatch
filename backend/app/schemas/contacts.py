@@ -36,3 +36,14 @@ class ContactUpdateResponse(BaseModel):
     person_id: str
     status: str
     updated_fields: dict[str, str]
+
+
+class ContactDeleteRequest(BaseModel):
+    session_id: str
+    person_id: str
+
+
+class ContactDeleteResponse(BaseModel):
+    session_id: str
+    person_id: str
+    status: str

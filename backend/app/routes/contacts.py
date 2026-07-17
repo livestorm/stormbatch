@@ -1,12 +1,15 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from app.schemas.contacts import (
+    ContactDeleteRequest,
+    ContactDeleteResponse,
     ContactUpdateRequest,
     ContactUpdateResponse,
     SessionContactsRequest,
     SessionContactsResponse,
 )
 from app.services.contacts_service import extract_contacts
+from app.routes.helpers import livestorm_error_to_http
 from app.services.livestorm_client import LivestormAPIError, LivestormClient
 
 router = APIRouter(tags=["contacts"])
@@ -30,7 +33,26 @@ async def get_session_contacts(request: Request, payload: SessionContactsRequest
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LivestormAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise livestorm_error_to_http(request, exc) from exc
+
+
+@router.post("/delete-contact", response_model=ContactDeleteResponse)
+async def delete_contact(request: Request, payload: ContactDeleteRequest) -> ContactDeleteResponse:
+    token = request.session.get("livestorm_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
+
+    session_id = payload.session_id.strip()
+    person_id = payload.person_id.strip()
+    if not session_id or not person_id:
+        raise HTTPException(status_code=400, detail="Session ID and person ID are required.")
+
+    try:
+        async with LivestormClient(token=token, use_bearer=True) as client:
+            await client.delete_session_person(session_id=session_id, person_id=person_id)
+        return ContactDeleteResponse(session_id=session_id, person_id=person_id, status="deleted")
+    except LivestormAPIError as exc:
+        raise livestorm_error_to_http(request, exc) from exc
 
 
 @router.post("/update-contact", response_model=ContactUpdateResponse)
@@ -65,4 +87,4 @@ async def update_contact(request: Request, payload: ContactUpdateRequest) -> Con
             updated_fields={field["id"]: field["value"] for field in fields},
         )
     except LivestormAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise livestorm_error_to_http(request, exc) from exc

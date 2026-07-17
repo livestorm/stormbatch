@@ -6,6 +6,7 @@ from app.schemas.jobs import (
     RetryFailedRowsRequest,
     RetryFailedRowsResponse,
 )
+from app.routes.helpers import livestorm_error_to_http
 from app.services.livestorm_client import LivestormAPIError, LivestormClient
 
 
@@ -27,7 +28,7 @@ async def job_status(request: Request, payload: JobStatusRequest) -> JobStatusRe
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LivestormAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise livestorm_error_to_http(request, exc) from exc
 
 
 @router.post("/retry-failed", response_model=RetryFailedRowsResponse)
@@ -78,6 +79,8 @@ async def retry_failed_rows(request: Request, payload: RetryFailedRowsRequest) -
                         }
                     )
                 except LivestormAPIError as exc:
+                    if exc.status_code == 401:
+                        raise
                     results.append(
                         {
                             "row_number": registrant.row_number,
@@ -90,3 +93,5 @@ async def retry_failed_rows(request: Request, payload: RetryFailedRowsRequest) -
         return RetryFailedRowsResponse(session_id=payload.session_id, results=results)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LivestormAPIError as exc:
+        raise livestorm_error_to_http(request, exc) from exc

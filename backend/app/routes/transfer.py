@@ -9,6 +9,7 @@ from app.schemas.transfer import (
     TransferRequest,
     TransferResponse,
 )
+from app.routes.helpers import livestorm_error_to_http
 from app.services.livestorm_client import LivestormAPIError, LivestormClient
 from app.services.transfer_service import extract_people_data
 
@@ -40,7 +41,7 @@ async def get_session_people(request: Request, payload: SessionPeopleRequest) ->
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LivestormAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise livestorm_error_to_http(request, exc) from exc
 
 
 @router.post("/transfer", response_model=TransferResponse)
@@ -110,4 +111,4 @@ async def transfer_registrants(request: Request, payload: TransferRequest) -> Tr
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LivestormAPIError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise livestorm_error_to_http(request, exc) from exc
