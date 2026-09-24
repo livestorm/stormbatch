@@ -272,7 +272,6 @@ const isReadyToSubmit = computed(() => {
   if (sourceMode.value === "upload") {
     return (
       Boolean(preview.value) &&
-      hasEmailColumn.value &&
       Object.values(autoMapping.value).includes("email")
     );
   }
