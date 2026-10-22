@@ -68,4 +68,10 @@ Set these environment variables on the service:
 
 Production mode (HTTPS-only session cookies, no CORS, required secret) turns on when `RENDER=true`, which Render sets on its services, or when `STORMBATCH_ENV=production` on any other host.
 
+### Testing a branch on a Render preview
+
+Turn on Pull Request Previews in the service's **Previews** tab. In Manual mode, a PR gets a preview when it has the `render-preview` label or `[render preview]` in its title; every push to the branch redeploys it, and closing the PR deletes it.
+
+A preview copies the service's environment variables, but logging in needs its own OAuth callback: StormBatch builds it from the preview's URL (`RENDER_EXTERNAL_URL`), so add `https://<preview host>/api/auth/livestorm/callback` to the Livestorm OAuth app's redirect URIs before you sign in.
+
 Uploads are limited to 10 MB and 20,000 rows (`MAX_UPLOAD_BYTES` and `MAX_ROWS` in `backend/app/services/excel_parser.py`).

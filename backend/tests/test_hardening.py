@@ -144,9 +144,10 @@ def test_retry_failed_is_capped_to_one_batch(client, session_cookie):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _run_in_production(code, secret):
+def _run_in_production(code, secret, **extra_env):
     env = {k: v for k, v in os.environ.items() if k not in ("SESSION_SECRET_KEY", "RENDER", "STORMBATCH_ENV")}
     env["RENDER"] = "true"
+    env.update(extra_env)
     if secret is not None:
         env["SESSION_SECRET_KEY"] = secret
     return subprocess.run([sys.executable, "-c", code], cwd=BACKEND_DIR, env=env, capture_output=True, text=True)
@@ -173,3 +174,22 @@ def test_production_uses_secure_browser_session_cookies_without_cors():
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.split() == ["True", "None", "False"]
+
+
+def test_render_preview_uses_its_own_oauth_callback():
+    code = (
+        "from fastapi.testclient import TestClient\n"
+        "from app.main import app\n"
+        "location = TestClient(app).get('/api/auth/livestorm/login', follow_redirects=False).headers['location']\n"
+        "from urllib.parse import parse_qs, urlparse\n"
+        "print(parse_qs(urlparse(location).query)['redirect_uri'][0])\n"
+    )
+    production = "https://stormbatch.example.com/api/auth/livestorm/callback"
+    env = {"LIVESTORM_OAUTH_REDIRECT_URI": production, "RENDER_EXTERNAL_URL": "https://stormbatch-pr-7.onrender.com"}
+
+    preview = _run_in_production(code, "a-long-random-secret", IS_PULL_REQUEST="true", **env)
+    base = _run_in_production(code, "a-long-random-secret", IS_PULL_REQUEST="false", **env)
+
+    assert preview.returncode == 0, preview.stderr
+    assert preview.stdout.strip() == "https://stormbatch-pr-7.onrender.com/api/auth/livestorm/callback"
+    assert base.stdout.strip() == production
