@@ -3,6 +3,7 @@ import { ref } from "vue";
 
 const props = defineProps({
   modelValue: { type: Array, required: true },
+  label: { type: String, default: "Session IDs" },
 });
 const emit = defineEmits(["update:modelValue"]);
 
@@ -65,7 +66,7 @@ function focusInput() {
 <template>
   <div class="session-field">
     <div class="field-row">
-      <span class="field-label">Session IDs</span>
+      <span class="field-label">{{ label }}</span>
       <span v-if="modelValue.length" class="count-badge">{{ modelValue.length }}</span>
     </div>
 

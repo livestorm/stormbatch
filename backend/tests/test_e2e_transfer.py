@@ -239,27 +239,25 @@ def test_session_people_requires_auth(client):
     assert response.status_code == 401
 
 
-def test_transfer_requires_auth(client):
-    """POST /api/transfer without a session cookie → 401."""
+def test_bulk_job_requires_auth(client):
+    """POST /api/bulk-jobs without a session cookie → 401."""
     response = client.post(
-        "/api/transfer",
+        "/api/bulk-jobs",
         json={
-            "target_session_ids": [TARGET_SESSION_ID],
-            "rows": [{"email": "test@example.com"}],
-            "included_fields": ["email"],
+            "session_id": TARGET_SESSION_ID,
+            "registrants": [{"fields": [{"id": "email", "value": "test@example.com"}]}],
         },
     )
     assert response.status_code == 401
 
 
-def test_transfer_rejects_missing_email_field(client, session_cookie):
-    """POST /api/transfer without email in included_fields → 400."""
+def test_bulk_job_rejects_missing_email_field(client, session_cookie):
+    """POST /api/bulk-jobs with a registrant that has no email → 400."""
     response = client.post(
-        "/api/transfer",
+        "/api/bulk-jobs",
         json={
-            "target_session_ids": [TARGET_SESSION_ID],
-            "rows": [{"first_name": "Test"}],
-            "included_fields": ["first_name"],
+            "session_id": TARGET_SESSION_ID,
+            "registrants": [{"fields": [{"id": "first_name", "value": "Test"}]}],
         },
         cookies={"session": session_cookie},
     )
@@ -267,28 +265,23 @@ def test_transfer_rejects_missing_email_field(client, session_cookie):
     assert "email" in response.json()["detail"].lower()
 
 
-def test_transfer_rejects_empty_rows(client, session_cookie):
-    """POST /api/transfer with zero rows → 400."""
+def test_bulk_job_rejects_empty_registrants(client, session_cookie):
+    """POST /api/bulk-jobs with zero registrants → 400."""
     response = client.post(
-        "/api/transfer",
-        json={
-            "target_session_ids": [TARGET_SESSION_ID],
-            "rows": [],
-            "included_fields": ["email"],
-        },
+        "/api/bulk-jobs",
+        json={"session_id": TARGET_SESSION_ID, "registrants": []},
         cookies={"session": session_cookie},
     )
     assert response.status_code == 400
 
 
-def test_transfer_rejects_empty_target_sessions(client, session_cookie):
-    """POST /api/transfer with no target session IDs → 400."""
+def test_bulk_job_rejects_invalid_session_id(client, session_cookie):
+    """POST /api/bulk-jobs with a malformed session ID → 400."""
     response = client.post(
-        "/api/transfer",
+        "/api/bulk-jobs",
         json={
-            "target_session_ids": [],
-            "rows": [{"email": "test@example.com"}],
-            "included_fields": ["email"],
+            "session_id": "",
+            "registrants": [{"fields": [{"id": "email", "value": "test@example.com"}]}],
         },
         cookies={"session": session_cookie},
     )
@@ -327,9 +320,9 @@ def test_route_fetch_session_people(client, session_cookie, use_api_key_auth):
 
 
 @needs_credentials
-def test_route_transfer_creates_job(client, session_cookie, use_api_key_auth):
+def test_route_bulk_job_creates_job(client, session_cookie, use_api_key_auth):
     """
-    Fetch first row from source → transfer to target → job created.
+    Fetch first row from source → send it as one chunk to target → job created.
     Requires LS_KEY to have access to both session IDs.
     """
     fetch_resp = client.post(
@@ -339,18 +332,19 @@ def test_route_transfer_creates_job(client, session_cookie, use_api_key_auth):
     )
     assert fetch_resp.status_code == 200, fetch_resp.text
     data = fetch_resp.json()
+    row = data["rows"][0]
 
-    transfer_resp = client.post(
-        "/api/transfer",
+    job_resp = client.post(
+        "/api/bulk-jobs",
         json={
-            "target_session_ids": [TARGET_SESSION_ID],
-            "rows": data["rows"][:1],
-            "included_fields": data["headers"],
+            "session_id": TARGET_SESSION_ID,
+            "registrants": [
+                {"fields": [{"id": fid, "value": row[fid]} for fid in data["headers"] if row.get(fid)]}
+            ],
         },
         cookies={"session": session_cookie},
     )
-    assert transfer_resp.status_code == 200, transfer_resp.text
-    result = transfer_resp.json()
-    assert len(result["jobs"]) == 1
-    assert result["jobs"][0]["job_id"]
-    assert result["jobs"][0]["session_id"] == TARGET_SESSION_ID
+    assert job_resp.status_code == 200, job_resp.text
+    result = job_resp.json()
+    assert result["job_id"]
+    assert result["session_id"] == TARGET_SESSION_ID

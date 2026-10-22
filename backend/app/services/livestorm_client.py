@@ -241,38 +241,6 @@ class LivestormClient:
         page_tasks = tasks_data.get("data", tasks_data)
         return page_tasks if isinstance(page_tasks, list) else []
 
-    async def get_session_fields(self, session_id: str) -> dict[str, Any]:
-        """Fetch one registrant from a session to discover its registration field IDs."""
-        response = await self._request(
-            "GET",
-            f"/v1/sessions/{session_id}/people",
-            params={"page[number]": 0, "page[size]": 1},
-            headers={"Accept": "application/vnd.api+json"},
-        )
-        data = self._handle_response(response, "Unable to fetch session fields")
-        people = data.get("data", [])
-
-        if not people:
-            return {"fields": [], "has_people": False}
-
-        fields = (
-            people[0]
-            .get("attributes", {})
-            .get("registrant_detail", {})
-            .get("fields", [])
-        )
-        return {
-            "fields": [
-                {
-                    "id": f["id"],
-                    "type": f.get("type", "text"),
-                    "required": f.get("required", False),
-                }
-                for f in fields
-            ],
-            "has_people": True,
-        }
-
     async def list_sessions(self, params: dict[str, Any]) -> dict[str, Any]:
         """List sessions (JSON:API filters, sort, page and include passed through as-is)."""
         response = await self._request(
