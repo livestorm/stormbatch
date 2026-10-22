@@ -6,6 +6,8 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from app.services.token_store import clear_token, read_token, store_token
+
 router = APIRouter(tags=["auth"])
 
 _CLIENT_ID = os.environ.get("LIVESTORM_OAUTH_CLIENT_ID", "")
@@ -65,17 +67,16 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
     if not access_token:
         return RedirectResponse("/?auth_error=no_access_token")
 
-    request.session["livestorm_token"] = access_token
+    store_token(request.session, access_token)
     return RedirectResponse("/")
 
 
 @router.get("/auth/status")
 async def auth_status(request: Request) -> dict:
-    token = request.session.get("livestorm_token")
-    return {"authenticated": bool(token)}
+    return {"authenticated": bool(read_token(request.session))}
 
 
 @router.post("/auth/logout")
 async def logout(request: Request) -> JSONResponse:
-    request.session.pop("livestorm_token", None)
+    clear_token(request.session)
     return JSONResponse({"status": "logged_out"})

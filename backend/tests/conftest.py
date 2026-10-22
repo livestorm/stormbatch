@@ -9,12 +9,15 @@ from starlette.testclient import TestClient
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "../../.env"))
 
+# Imported after .env is loaded: both read SESSION_SECRET_KEY at import.
+from app.config import SESSION_SECRET  # noqa: E402
+from app.services.token_store import encrypt_token  # noqa: E402
+
 # ── Credentials ────────────────────────────────────────────────────────────────
 
 LS_KEY = os.getenv("LS_KEY", "")
 SOURCE_SESSION_ID = "51a6cda2-25cd-4657-b6dc-8519275f90e9"
 TARGET_SESSION_ID = "de121ecd-9d38-43aa-a9e1-0d4216fd0bfc"
-SESSION_SECRET = os.getenv("SESSION_SECRET_KEY", "dev-secret-change-in-production")
 
 needs_credentials = pytest.mark.skipif(
     not LS_KEY,
@@ -47,7 +50,7 @@ def session_cookie() -> str:
     send the key without a Bearer prefix, which is what Livestorm expects for
     private API keys.
     """
-    return make_session_cookie({"livestorm_token": LS_KEY})
+    return make_session_cookie({"livestorm_token": encrypt_token(LS_KEY)})
 
 
 @pytest.fixture

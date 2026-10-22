@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.schemas.contacts import (
     ContactDeleteRequest,
@@ -9,7 +9,7 @@ from app.schemas.contacts import (
     SessionContactsResponse,
 )
 from app.services.contacts_service import extract_contacts
-from app.routes.helpers import livestorm_error_to_http
+from app.routes.helpers import livestorm_error_to_http, require_token
 from app.services.livestorm_client import LivestormAPIError, LivestormClient
 
 router = APIRouter(tags=["contacts"])
@@ -19,10 +19,7 @@ PROTECTED_FIELD_IDS = {"email"}
 
 
 @router.post("/session-contacts", response_model=SessionContactsResponse)
-async def get_session_contacts(request: Request, payload: SessionContactsRequest) -> SessionContactsResponse:
-    token = request.session.get("livestorm_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
+async def get_session_contacts(request: Request, payload: SessionContactsRequest, token: str = Depends(require_token)) -> SessionContactsResponse:
     try:
         async with LivestormClient(token=token, use_bearer=True) as client:
             people = await client.list_session_people(session_id=payload.session_id.strip())
@@ -37,11 +34,7 @@ async def get_session_contacts(request: Request, payload: SessionContactsRequest
 
 
 @router.post("/delete-contact", response_model=ContactDeleteResponse)
-async def delete_contact(request: Request, payload: ContactDeleteRequest) -> ContactDeleteResponse:
-    token = request.session.get("livestorm_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
-
+async def delete_contact(request: Request, payload: ContactDeleteRequest, token: str = Depends(require_token)) -> ContactDeleteResponse:
     session_id = payload.session_id.strip()
     person_id = payload.person_id.strip()
     if not session_id or not person_id:
@@ -56,11 +49,7 @@ async def delete_contact(request: Request, payload: ContactDeleteRequest) -> Con
 
 
 @router.post("/update-contact", response_model=ContactUpdateResponse)
-async def update_contact(request: Request, payload: ContactUpdateRequest) -> ContactUpdateResponse:
-    token = request.session.get("livestorm_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
-
+async def update_contact(request: Request, payload: ContactUpdateRequest, token: str = Depends(require_token)) -> ContactUpdateResponse:
     fields = [
         {"id": field.id.strip(), "value": field.value}
         for field in payload.fields

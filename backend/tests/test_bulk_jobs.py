@@ -23,8 +23,8 @@ def _registrant(**fields):
     return {"fields": [{"id": key, "value": value} for key, value in fields.items()]}
 
 
-def _preview(client, filename, content):
-    return client.post("/api/preview", files={"file": (filename, content)})
+def _preview(client, cookie, filename, content):
+    return client.post("/api/preview", files={"file": (filename, content)}, cookies={"session": cookie})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -32,14 +32,14 @@ def _preview(client, filename, content):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_preview_keeps_cells_as_text(client):
+def test_preview_keeps_cells_as_text(client, session_cookie):
     csv = (
         "email,zip,last_name,phone,score\n"
         "a@example.com,01234,NA,0612345678,12\n"
         "b@example.com,,Null,,\n"
     )
 
-    response = _preview(client, "people.csv", csv.encode())
+    response = _preview(client, session_cookie, "people.csv", csv.encode())
 
     assert response.status_code == 200, response.text
     body = response.json()
@@ -56,17 +56,17 @@ def test_preview_keeps_cells_as_text(client):
     assert body["row_count"] == 2
 
 
-def test_preview_returns_every_row(client):
+def test_preview_returns_every_row(client, session_cookie):
     csv = "email\n" + "".join(f"person{i}@example.com\n" for i in range(120))
 
-    body = _preview(client, "people.csv", csv.encode()).json()
+    body = _preview(client, session_cookie, "people.csv", csv.encode()).json()
 
     assert body["row_count"] == 120
     assert len(body["rows"]) == 120
     assert body["rows"][-1]["email"] == "person119@example.com"
 
 
-def test_preview_xlsx_numbers_with_gaps_have_no_float_suffix(client):
+def test_preview_xlsx_numbers_with_gaps_have_no_float_suffix(client, session_cookie):
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(["Email", "Employees"])
@@ -75,17 +75,17 @@ def test_preview_xlsx_numbers_with_gaps_have_no_float_suffix(client):
     buffer = BytesIO()
     workbook.save(buffer)
 
-    body = _preview(client, "people.xlsx", buffer.getvalue()).json()
+    body = _preview(client, session_cookie, "people.xlsx", buffer.getvalue()).json()
 
     assert body["rows"][0]["Employees"] == "1234"
     assert body["rows"][1]["Employees"] == ""
     assert body["suggestions"]["Email"] == "email"
 
 
-def test_preview_drops_empty_rows_and_columns(client):
+def test_preview_drops_empty_rows_and_columns(client, session_cookie):
     csv = "email,,first_name\na@example.com,,Ann\n,,\nb@example.com,,Bob\n"
 
-    body = _preview(client, "people.csv", csv.encode()).json()
+    body = _preview(client, session_cookie, "people.csv", csv.encode()).json()
 
     assert body["headers"] == ["email", "first_name"]
     assert [row["email"] for row in body["rows"]] == ["a@example.com", "b@example.com"]
@@ -206,18 +206,18 @@ def test_removed_endpoints_are_gone(client, session_cookie):
     assert client.get("/api/auth/me", cookies={"session": session_cookie}).status_code in (404, 405)
 
 
-def test_preview_reads_single_column_and_semicolon_csv(client):
-    single = _preview(client, "list.csv", b"Email\nann@example.com\nbob@test.org\n").json()
+def test_preview_reads_single_column_and_semicolon_csv(client, session_cookie):
+    single = _preview(client, session_cookie, "list.csv", b"Email\nann@example.com\nbob@test.org\n").json()
     assert single["headers"] == ["Email"]
     assert [row["Email"] for row in single["rows"]] == ["ann@example.com", "bob@test.org"]
 
-    semicolon = _preview(client, "list.csv", b"email;first_name\nann@example.com;Ann\n").json()
+    semicolon = _preview(client, session_cookie, "list.csv", b"email;first_name\nann@example.com;Ann\n").json()
     assert semicolon["rows"] == [{"email": "ann@example.com", "first_name": "Ann"}]
 
 
-def test_preview_reads_windows_1252_csv(client):
+def test_preview_reads_windows_1252_csv(client, session_cookie):
     content = "email,last_name\nann@example.com,Lefèvre\n".encode("cp1252")
 
-    body = _preview(client, "list.csv", content).json()
+    body = _preview(client, session_cookie, "list.csv", content).json()
 
     assert body["rows"][0]["last_name"] == "Lefèvre"

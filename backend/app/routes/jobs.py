@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.schemas.jobs import (
     JobStatusRequest,
@@ -6,7 +6,8 @@ from app.schemas.jobs import (
     RetryFailedRowsRequest,
     RetryFailedRowsResponse,
 )
-from app.routes.helpers import livestorm_error_to_http
+from app.routes.helpers import livestorm_error_to_http, require_token
+from app.services.bulk_job_service import BULK_JOB_TASK_LIMIT
 from app.services.livestorm_client import LivestormAPIError, LivestormClient
 
 
@@ -14,10 +15,7 @@ router = APIRouter(tags=["jobs"])
 
 
 @router.post("/job-status", response_model=JobStatusResponse)
-async def job_status(request: Request, payload: JobStatusRequest) -> JobStatusResponse:
-    token = request.session.get("livestorm_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
+async def job_status(request: Request, payload: JobStatusRequest, token: str = Depends(require_token)) -> JobStatusResponse:
     try:
         async with LivestormClient(token=token, use_bearer=True) as client:
             status_response = await client.get_job_status(
@@ -32,10 +30,13 @@ async def job_status(request: Request, payload: JobStatusRequest) -> JobStatusRe
 
 
 @router.post("/retry-failed", response_model=RetryFailedRowsResponse)
-async def retry_failed_rows(request: Request, payload: RetryFailedRowsRequest) -> RetryFailedRowsResponse:
-    token = request.session.get("livestorm_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
+async def retry_failed_rows(request: Request, payload: RetryFailedRowsRequest, token: str = Depends(require_token)) -> RetryFailedRowsResponse:
+    # Each registrant costs two Livestorm calls; the UI retries one job (≤50 rows) at a time.
+    if len(payload.registrants) > BULK_JOB_TASK_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Retry at most {BULK_JOB_TASK_LIMIT} registrants at a time.",
+        )
     try:
         results = []
         async with LivestormClient(token=token, use_bearer=True) as client:

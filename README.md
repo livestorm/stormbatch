@@ -60,3 +60,12 @@ Health check path: /health
 ```
 
 Render provides the `PORT` environment variable automatically.
+
+Set these environment variables on the service:
+
+- `SESSION_SECRET_KEY`: a long random value (for example `python -c "import secrets; print(secrets.token_urlsafe(48))"`). It signs the session cookie and encrypts the Livestorm token stored in it. In production the app refuses to start without it, and changing it logs everyone out.
+- `LIVESTORM_OAUTH_CLIENT_ID`, `LIVESTORM_OAUTH_CLIENT_SECRET`, `LIVESTORM_OAUTH_REDIRECT_URI` (and optionally `LIVESTORM_OAUTH_SCOPES`).
+
+Production mode (HTTPS-only session cookies, no CORS, required secret) turns on when `RENDER=true`, which Render sets on its services, or when `STORMBATCH_ENV=production` on any other host.
+
+Uploads are limited to 10 MB and 20,000 rows (`MAX_UPLOAD_BYTES` and `MAX_ROWS` in `backend/app/services/excel_parser.py`).
