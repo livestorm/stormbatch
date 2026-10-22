@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -58,10 +58,20 @@ if FRONTEND_DIST.exists() and FRONTEND_ASSETS.exists():
         name="frontend-assets",
     )
 
+    _FRONTEND_ROOT = FRONTEND_DIST.resolve()
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend(full_path: str) -> FileResponse:
-        requested_file = FRONTEND_DIST / full_path
-        if full_path and requested_file.is_file():
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        # Resolve and require the file to sit inside dist/, so "../" segments
+        # (plain or percent-encoded) can never reach files outside it.
+        requested_file = (FRONTEND_DIST / full_path).resolve()
+        if (
+            full_path
+            and requested_file.is_relative_to(_FRONTEND_ROOT)
+            and requested_file.is_file()
+        ):
             return FileResponse(requested_file)
         # index.html must never be cached so browsers always fetch the latest
         # version after a deploy (hashed assets can still cache indefinitely).
