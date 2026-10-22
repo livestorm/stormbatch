@@ -6,13 +6,14 @@ import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from app.config import OAUTH_REDIRECT_URI
 from app.services.token_store import clear_token, read_token, store_token
 
 router = APIRouter(tags=["auth"])
 
 _CLIENT_ID = os.environ.get("LIVESTORM_OAUTH_CLIENT_ID", "")
 _CLIENT_SECRET = os.environ.get("LIVESTORM_OAUTH_CLIENT_SECRET", "")
-_REDIRECT_URI = os.environ.get("LIVESTORM_OAUTH_REDIRECT_URI", "")
+_REDIRECT_URI = OAUTH_REDIRECT_URI
 _SCOPES = os.environ.get("LIVESTORM_OAUTH_SCOPES", "events:read events:write")
 
 _AUTHORIZE_URL = "https://app.livestorm.co/oauth/authorize"
