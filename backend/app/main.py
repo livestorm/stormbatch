@@ -12,6 +12,7 @@ from app.routes.contacts import router as contacts_router
 from app.routes.jobs import router as jobs_router
 from app.routes.preview import router as preview_router
 from app.routes.registration import router as registration_router
+from app.routes.sessions import router as sessions_router
 from app.routes.transfer import router as transfer_router
 from app.routes.validation import router as validation_router
 
@@ -41,6 +42,7 @@ app.include_router(jobs_router, prefix="/api")
 app.include_router(transfer_router, prefix="/api")
 app.include_router(validation_router, prefix="/api")
 app.include_router(contacts_router, prefix="/api")
+app.include_router(sessions_router, prefix="/api")
 
 
 @app.get("/health")

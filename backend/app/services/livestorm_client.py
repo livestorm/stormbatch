@@ -273,11 +273,45 @@ class LivestormClient:
             "has_people": True,
         }
 
+    async def list_sessions(self, params: dict[str, Any]) -> dict[str, Any]:
+        """List sessions (JSON:API filters, sort, page and include passed through as-is)."""
+        response = await self._request(
+            "GET",
+            "/v1/sessions",
+            params=params,
+            headers={"Accept": "application/vnd.api+json"},
+        )
+        return self._handle_response(response, "Unable to list sessions")
+
+    async def list_events(self, params: dict[str, Any]) -> dict[str, Any]:
+        """List events, used for title search since sessions have no title filter."""
+        response = await self._request(
+            "GET",
+            "/v1/events",
+            params=params,
+            headers={"Accept": "application/vnd.api+json"},
+        )
+        return self._handle_response(response, "Unable to search events")
+
+    async def get_session(self, session_id: str) -> dict[str, Any]:
+        """Fetch one session with its event, which carries the registration form fields."""
+        response = await self._request(
+            "GET",
+            f"/v1/sessions/{session_id}",
+            params={"include": "event"},
+            headers={"Accept": "application/vnd.api+json"},
+        )
+        if response.status_code == 404:
+            raise LivestormAPIError(
+                "No session found with this ID in your workspace.", status_code=404
+            )
+        return self._handle_response(response, "Unable to fetch session")
+
     async def list_session_people(
         self,
         session_id: str,
         email: Optional[str] = None,
-        page_size: int = 50,
+        page_size: int = 100,
         inter_page_delay: float = 0.3,
     ) -> list[dict[str, Any]]:
         page_number = 0
