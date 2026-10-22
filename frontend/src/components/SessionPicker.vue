@@ -263,7 +263,6 @@ onBeforeUnmount(() => clearTimeout(debounceTimer));
   color: var(--color-text-neutral-base);
   font-size: var(--text-content-text-regular-md);
   line-height: var(--text-content-text-regular-md--line-height);
-  color-scheme: dark;
 }
 
 .picker-caption,

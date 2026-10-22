@@ -405,7 +405,6 @@ function downloadFailedRows(rows) {
   color: var(--color-text-neutral-base);
   font-family: ui-monospace, "SFMono-Regular", monospace;
   font-size: 0.875em;
-  color-scheme: dark;
   cursor: pointer;
 }
 

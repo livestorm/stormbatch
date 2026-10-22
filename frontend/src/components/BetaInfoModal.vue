@@ -272,13 +272,13 @@ function onOverlayClick(e) {
 }
 
 .method.get {
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  background: var(--color-surface-success-300);
+  color: var(--color-text-success-secondary);
 }
 
 .method.post {
-  background: rgba(99, 102, 241, 0.15);
-  color: #818cf8;
+  background: var(--color-actions-primary-idle-alpha-light);
+  color: var(--color-text-primary-base);
 }
 
 .endpoint-row .path {

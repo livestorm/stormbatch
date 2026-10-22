@@ -1312,7 +1312,7 @@ body {
 
 .check-attr-input:focus {
   border-bottom-color: var(--color-borders-primary-strong);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-actions-neutral-hover-overlay);
   border-radius: 4px 4px 0 0;
 }
 
@@ -1527,4 +1527,19 @@ body {
 .back-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ── Theme ────────────────────────────────────────── */
+
+/* Native controls (date picker, selects, scrollbars) follow the theme. */
+html[data-colors-semantic="dark"] {
+  color-scheme: dark;
+}
+
+html[data-colors-semantic="light"] {
+  color-scheme: light;
+}
+
+.icon-btn {
+  padding: 7px;
 }
