@@ -1,12 +1,12 @@
-import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from app.config import IS_PRODUCTION, SESSION_SECRET
 from app.routes.auth import router as auth_router
 from app.routes.bulk_jobs import router as bulk_jobs_router
 from app.routes.contacts import router as contacts_router
@@ -14,25 +14,40 @@ from app.routes.jobs import router as jobs_router
 from app.routes.preview import router as preview_router
 from app.routes.sessions import router as sessions_router
 from app.routes.transfer import router as transfer_router
-
-_SESSION_SECRET = os.environ.get("SESSION_SECRET_KEY", "dev-secret-change-in-production")
+from app.services import excel_parser
 
 app = FastAPI(title="StormBatch API")
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=_SESSION_SECRET,
+    secret_key=SESSION_SECRET,
     same_site="lax",
-    https_only=False,
+    https_only=IS_PRODUCTION,
+    # Expires with the browser session, as the About dialog promises.
+    max_age=None,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+if not IS_PRODUCTION:
+    # Only for running the Vite dev server without its /api proxy.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+@app.middleware("http")
+async def reject_oversized_uploads(request: Request, call_next):
+    # Refuse big uploads from their Content-Length, before Starlette spools the
+    # body to disk; the parser checks the actual size again.
+    if request.url.path == "/api/preview":
+        length = request.headers.get("content-length", "")
+        # Allow for the multipart envelope around the file.
+        if length.isdigit() and int(length) > excel_parser.MAX_UPLOAD_BYTES + 64 * 1024:
+            return JSONResponse({"detail": excel_parser.upload_too_large_message()}, status_code=413)
+    return await call_next(request)
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(preview_router, prefix="/api")

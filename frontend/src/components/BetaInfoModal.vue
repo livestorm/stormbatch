@@ -86,7 +86,7 @@ function onOverlayClick(e) {
           <h3>Data handling</h3>
           <ul class="info-list">
             <li>No attendee data is persisted server-side. Uploaded files and registrant rows are processed in memory and discarded after the request.</li>
-            <li>Your Livestorm OAuth token is stored only in a signed, server-side session cookie (httpOnly). It is never exposed to client-side JavaScript.</li>
+            <li>Your Livestorm OAuth token is encrypted and kept in a signed, httpOnly session cookie. Page scripts can't read it, and only the StormBatch server can decrypt it.</li>
             <li>There is no database. StormBatch has no persistent storage of any kind.</li>
             <li>Session cookies expire when your browser session ends, or when you click <strong>Disconnect</strong>.</li>
           </ul>

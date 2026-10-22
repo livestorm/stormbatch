@@ -5,3 +5,7 @@ services:
     plan: starter
     healthCheckPath: /health
     autoDeploy: true
+    envVars:
+      # Also implied by RENDER=true; explicit so production mode never depends on it.
+      - key: STORMBATCH_ENV
+        value: production

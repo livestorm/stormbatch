@@ -1,8 +1,8 @@
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from app.routes.helpers import livestorm_error_to_http
+from app.routes.helpers import livestorm_error_to_http, require_token
 from app.schemas.sessions import RegisteredEmailsResponse, SessionDetailResponse, SessionListResponse
 from app.services.livestorm_client import LivestormAPIError, LivestormClient
 from app.services.sessions_service import (
@@ -24,6 +24,7 @@ SESSION_NOT_FOUND_DETAIL = "No session found with this ID in your workspace."
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions(
     request: Request,
+    token: str = Depends(require_token),
     q: str = "",
     scope: Literal["upcoming", "any"] = "upcoming",
     date_from: Optional[int] = Query(None, ge=0),
@@ -36,10 +37,6 @@ async def list_sessions(
     title. `scope="upcoming"` keeps upcoming and live sessions only; dates are
     unix timestamps bounding the session start.
     """
-    token = request.session.get("livestorm_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
-
     query = q.strip()
     try:
         async with LivestormClient(token=token, use_bearer=True) as client:
@@ -66,11 +63,8 @@ async def list_sessions(
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
-async def get_session(request: Request, session_id: str) -> SessionDetailResponse:
+async def get_session(request: Request, session_id: str, token: str = Depends(require_token)) -> SessionDetailResponse:
     """One session with its event's registration form fields."""
-    token = request.session.get("livestorm_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
     if not is_session_id(session_id):
         raise HTTPException(status_code=404, detail=SESSION_NOT_FOUND_DETAIL)
 
@@ -85,11 +79,8 @@ async def get_session(request: Request, session_id: str) -> SessionDetailRespons
 
 
 @router.get("/sessions/{session_id}/emails", response_model=RegisteredEmailsResponse)
-async def get_registered_emails(request: Request, session_id: str) -> RegisteredEmailsResponse:
+async def get_registered_emails(request: Request, session_id: str, token: str = Depends(require_token)) -> RegisteredEmailsResponse:
     """Emails already registered to a session, to skip them before sending a batch."""
-    token = request.session.get("livestorm_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated. Please connect your Livestorm account.")
     if not is_session_id(session_id):
         raise HTTPException(status_code=404, detail=SESSION_NOT_FOUND_DETAIL)
 

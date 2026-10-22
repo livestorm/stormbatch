@@ -18,10 +18,19 @@ AUTO_SUGGESTIONS = {
 }
 
 
+# Uploads are parsed in memory and every row goes back to the browser, so both
+# are capped. 20,000 rows is 400 bulk jobs.
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_ROWS = 20_000
+
 # Read every cell as text: keeps leading zeros (zip codes, phone numbers), avoids
 # "1234.0" from numeric columns with gaps, and only treats truly empty cells as
 # missing, so values like "NA" or "Null" survive.
 _READ_OPTIONS = {"dtype": str, "keep_default_na": False, "na_values": [""]}
+
+
+def upload_too_large_message() -> str:
+    return f"This file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB. Split it and upload the parts one after the other."
 
 
 def normalize_header(header: str) -> str:
@@ -123,9 +132,11 @@ async def parse_excel_upload(file: UploadFile) -> dict:
     if not file.filename:
         raise ValueError("The uploaded file must be .xlsx or .csv")
 
-    raw_bytes = await file.read()
+    raw_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
     if not raw_bytes:
         raise ValueError("Uploaded file is empty")
+    if len(raw_bytes) > MAX_UPLOAD_BYTES:
+        raise ValueError(upload_too_large_message())
 
     # pandas parsing is CPU-bound; keep it off the event loop.
     return await run_in_threadpool(parse_upload_bytes, file.filename, raw_bytes)
@@ -139,6 +150,11 @@ def parse_upload_bytes(filename: str, raw_bytes: bytes) -> dict:
     dataframe = clean_dataframe(dataframe)
     if dataframe.empty:
         raise ValueError("Uploaded file is empty")
+    if len(dataframe) > MAX_ROWS:
+        raise ValueError(
+            f"This file has {len(dataframe):,} rows. StormBatch handles up to {MAX_ROWS:,} "
+            "at a time: split the file and upload the parts one after the other."
+        )
 
     rows = []
     for row in dataframe.to_dict(orient="records"):
