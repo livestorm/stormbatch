@@ -18,6 +18,14 @@ class LivestormAPIError(Exception):
         self.status_code = status_code
 
 
+class TooManyRecordsError(Exception):
+    """A listing holds more records than the caller agreed to page through."""
+
+    def __init__(self, record_count: int) -> None:
+        super().__init__(f"{record_count} records")
+        self.record_count = record_count
+
+
 class LivestormClient:
     BASE_URL = "https://api.livestorm.co"
 
@@ -281,7 +289,13 @@ class LivestormClient:
         email: Optional[str] = None,
         page_size: int = 100,
         inter_page_delay: float = 0.3,
+        max_records: Optional[int] = None,
     ) -> list[dict[str, Any]]:
+        """Every registrant of a session, one call per page.
+
+        With max_records, raises TooManyRecordsError as soon as the first page
+        reports more, instead of spending a call on every page.
+        """
         page_number = 0
         people = []
 
@@ -315,6 +329,11 @@ class LivestormClient:
                     if v is not None:
                         return v
                 return None
+
+            if max_records is not None:
+                record_count = _first("record_count", "total_count", "total")
+                if record_count is not None and int(record_count) > max_records:
+                    raise TooManyRecordsError(int(record_count))
 
             next_page = _first("next_page", "nextPage", "next")
             total_pages = _first("total_pages", "totalPages", "page_count", "pageCount", "last")
