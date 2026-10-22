@@ -8,13 +8,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.routes.auth import router as auth_router
+from app.routes.bulk_jobs import router as bulk_jobs_router
 from app.routes.contacts import router as contacts_router
 from app.routes.jobs import router as jobs_router
 from app.routes.preview import router as preview_router
-from app.routes.registration import router as registration_router
 from app.routes.sessions import router as sessions_router
 from app.routes.transfer import router as transfer_router
-from app.routes.validation import router as validation_router
 
 _SESSION_SECRET = os.environ.get("SESSION_SECRET_KEY", "dev-secret-change-in-production")
 
@@ -37,10 +36,9 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(preview_router, prefix="/api")
-app.include_router(registration_router, prefix="/api")
+app.include_router(bulk_jobs_router, prefix="/api")
 app.include_router(jobs_router, prefix="/api")
 app.include_router(transfer_router, prefix="/api")
-app.include_router(validation_router, prefix="/api")
 app.include_router(contacts_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
 

@@ -34,9 +34,9 @@ function onOverlayClick(e) {
           <h3>How it works</h3>
           <ol class="steps-list">
             <li>You authenticate with your Livestorm account via OAuth 2.0 — no API key ever leaves your browser session.</li>
-            <li>Choose a source: upload a <code>.xlsx</code> or <code>.csv</code> file, or pull registrants directly from an existing Livestorm session.</li>
-            <li>Map columns to Livestorm field IDs (e.g. <code>email</code>, <code>first_name</code>).</li>
-            <li>Enter one or more target session IDs.</li>
+            <li>Pick a session from your upcoming sessions, or find one by event title, date or session ID.</li>
+            <li>Choose what to do: upload a <code>.xlsx</code> or <code>.csv</code> file, import the registrants of another session, or edit the session's registrants.</li>
+            <li>Match your columns to the fields of the session's registration form (e.g. <code>email</code>, <code>first_name</code>). You can add more target sessions before sending.</li>
             <li>StormBatch creates <strong>bulk registration jobs</strong> via the Livestorm API in chunks of 50 registrants, then polls each job until it reaches a terminal state.</li>
           </ol>
         </section>
@@ -46,23 +46,33 @@ function onOverlayClick(e) {
           <div class="endpoint-list">
             <div class="endpoint-row">
               <code class="method get">GET</code>
-              <code class="path">/v1/me</code>
-              <span>Fetch your profile (name, email, avatar) after login.</span>
+              <code class="path">/v1/sessions</code>
+              <span>List your upcoming sessions for the session picker.</span>
+            </div>
+            <div class="endpoint-row">
+              <code class="method get">GET</code>
+              <code class="path">/v1/events</code>
+              <span>Search sessions by event title.</span>
+            </div>
+            <div class="endpoint-row">
+              <code class="method get">GET</code>
+              <code class="path">/v1/sessions/{id}</code>
+              <span>Open a session and read its registration form fields.</span>
             </div>
             <div class="endpoint-row">
               <code class="method get">GET</code>
               <code class="path">/v1/sessions/{id}/people</code>
-              <span>Paginate through all registrants in a source session (transfer mode).</span>
+              <span>Paginate through all registrants of a session (import and edit).</span>
             </div>
             <div class="endpoint-row">
               <code class="method post">POST</code>
-              <code class="path">/v1/sessions/{id}/bulk_jobs</code>
+              <code class="path">/v1/sessions/{id}/people/bulk</code>
               <span>Create a bulk registration job for up to 50 registrants at a time.</span>
             </div>
             <div class="endpoint-row">
               <code class="method get">GET</code>
-              <code class="path">/v1/sessions/{id}/bulk_jobs/{job_id}</code>
-              <span>Poll job status until it reaches <code>ended</code>, <code>completed</code>, or <code>failed</code>.</span>
+              <code class="path">/v1/jobs/{id}</code>
+              <span>Poll job status until it reaches <code>ended</code>, <code>completed</code>, or <code>failed</code>, then read its tasks.</span>
             </div>
             <div class="endpoint-row">
               <code class="method post">POST</code>

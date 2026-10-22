@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import csv
 from io import BytesIO
 
 import pandas as pd
 from fastapi import UploadFile
+from starlette.concurrency import run_in_threadpool
 
 
 AUTO_SUGGESTIONS = {
@@ -14,6 +16,12 @@ AUTO_SUGGESTIONS = {
     "last_name": "last_name",
     "lastname": "last_name",
 }
+
+
+# Read every cell as text: keeps leading zeros (zip codes, phone numbers), avoids
+# "1234.0" from numeric columns with gaps, and only treats truly empty cells as
+# missing, so values like "NA" or "Null" survive.
+_READ_OPTIONS = {"dtype": str, "keep_default_na": False, "na_values": [""]}
 
 
 def normalize_header(header: str) -> str:
@@ -27,7 +35,7 @@ def clean_cell(value: object) -> str:
 
 
 def read_excel_with_header_detection(raw_bytes: bytes) -> pd.DataFrame:
-    dataframe = pd.read_excel(BytesIO(raw_bytes), engine="openpyxl")
+    dataframe = pd.read_excel(BytesIO(raw_bytes), engine="openpyxl", **_READ_OPTIONS)
     if dataframe.empty:
         return dataframe
 
@@ -45,18 +53,36 @@ def read_excel_with_header_detection(raw_bytes: bytes) -> pd.DataFrame:
     first_row_has_email = any(value in {"email", "email_address"} for value in normalized_first_row)
     columns_have_email = any(value in {"email", "email_address"} for value in normalized_columns)
     if has_placeholder_columns and first_row_has_email and not columns_have_email:
-        return pd.read_excel(BytesIO(raw_bytes), engine="openpyxl", header=1)
+        return pd.read_excel(BytesIO(raw_bytes), engine="openpyxl", header=1, **_READ_OPTIONS)
 
     return dataframe
 
 
-def read_csv_with_delimiter_detection(raw_bytes: bytes) -> pd.DataFrame:
+# Python's sniffer considers any character a delimiter, so a one-column list
+# ("email" then addresses) used to split on "m". Only real delimiters qualify.
+_CSV_DELIMITERS = ",;\t|"
+
+
+def detect_csv_delimiter(raw_bytes: bytes) -> str:
+    sample = raw_bytes[:64 * 1024].decode("utf-8", errors="ignore")
     try:
-        dataframe = pd.read_csv(BytesIO(raw_bytes), sep=None, engine="python")
-    except Exception:
-        # Fall back to the default comma parser if Python's CSV sniffer cannot
-        # infer the delimiter from a very small or unusual file.
-        dataframe = pd.read_csv(BytesIO(raw_bytes))
+        return csv.Sniffer().sniff(sample, delimiters=_CSV_DELIMITERS).delimiter
+    except csv.Error:
+        # A single column, or a sample too small to tell.
+        return ","
+
+
+def read_csv_bytes(raw_bytes: bytes, **options) -> pd.DataFrame:
+    try:
+        return pd.read_csv(BytesIO(raw_bytes), encoding="utf-8", **options)
+    except UnicodeDecodeError:
+        # Excel on Windows saves CSV files as Windows-1252.
+        return pd.read_csv(BytesIO(raw_bytes), encoding="cp1252", **options)
+
+
+def read_csv_with_delimiter_detection(raw_bytes: bytes) -> pd.DataFrame:
+    delimiter = detect_csv_delimiter(raw_bytes)
+    dataframe = read_csv_bytes(raw_bytes, sep=delimiter, **_READ_OPTIONS)
 
     if dataframe.empty:
         return dataframe
@@ -72,10 +98,7 @@ def read_csv_with_delimiter_detection(raw_bytes: bytes) -> pd.DataFrame:
     columns_have_email = any(value in {"email", "email_address"} for value in normalized_columns)
 
     if first_row_has_email and not columns_have_email:
-        try:
-            return pd.read_csv(BytesIO(raw_bytes), sep=None, engine="python", header=1)
-        except Exception:
-            return pd.read_csv(BytesIO(raw_bytes), header=1)
+        return read_csv_bytes(raw_bytes, sep=delimiter, header=1, **_READ_OPTIONS)
 
     return dataframe
 
@@ -104,7 +127,12 @@ async def parse_excel_upload(file: UploadFile) -> dict:
     if not raw_bytes:
         raise ValueError("Uploaded file is empty")
 
-    dataframe = read_upload_to_dataframe(file.filename, raw_bytes)
+    # pandas parsing is CPU-bound; keep it off the event loop.
+    return await run_in_threadpool(parse_upload_bytes, file.filename, raw_bytes)
+
+
+def parse_upload_bytes(filename: str, raw_bytes: bytes) -> dict:
+    dataframe = read_upload_to_dataframe(filename, raw_bytes)
     if dataframe.empty:
         raise ValueError("Uploaded file is empty")
 
@@ -139,7 +167,6 @@ async def parse_excel_upload(file: UploadFile) -> dict:
 
     return {
         "headers": headers,
-        "preview_rows": rows[:5],
         "normalized_headers": normalized_headers,
         "suggestions": suggestions,
         "row_count": len(rows),
