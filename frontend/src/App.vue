@@ -10,7 +10,7 @@ import SessionPicker from "./components/SessionPicker.vue";
 import UploadFlow from "./components/UploadFlow.vue";
 import { SESSION_EXPIRED_MESSAGE, onSessionExpired } from "./api";
 import { fetchSession } from "./sessions";
-import livestormIcon from "../assets/Icon-Livestorm-Tertiary-Light.png";
+import { livestormLogo, theme, toggleTheme } from "./theme";
 
 const showBetaInfo = ref(false);
 
@@ -118,12 +118,22 @@ function backToActions() {
 
   <header class="app-bar">
     <div class="app-bar-brand">
-      <img :src="livestormIcon" alt="Livestorm" class="app-bar-logo" />
+      <img :src="livestormLogo" alt="Livestorm" class="app-bar-logo" />
       <span class="app-bar-sep"></span>
       <span class="app-bar-name">StormBatch</span>
       <span class="app-bar-beta">Beta</span>
     </div>
     <div class="app-bar-auth">
+      <button
+        class="bar-btn icon-btn"
+        type="button"
+        :aria-label="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+        :title="theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+        @click="toggleTheme"
+      >
+        <svg v-if="theme === 'dark'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
       <span v-if="isAuthLoading" class="auth-status-text">Connecting…</span>
       <button v-else-if="isAuthenticated" class="bar-btn" type="button" @click="handleLogout">Disconnect</button>
     </div>

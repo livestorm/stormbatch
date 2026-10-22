@@ -1,5 +1,8 @@
 <script setup>
-import livestormIcon from "../../assets/Icon-Livestorm-Tertiary-Light.png";
+// The brand logo follows the page theme; the icon inside the connect button
+// sits on the button's own color, so it keeps the white variant.
+import buttonIcon from "../../assets/Icon-Livestorm-Tertiary-Light.png";
+import { livestormLogo } from "../theme";
 
 defineProps({
   errorMessage: { type: String, default: "" },
@@ -19,7 +22,7 @@ const FEATURES = [
   <div class="onboarding-state">
     <div class="onboarding-card">
       <div class="onboarding-brand">
-        <img :src="livestormIcon" alt="Livestorm" class="onboarding-logo" />
+        <img :src="livestormLogo" alt="Livestorm" class="onboarding-logo" />
         <span class="onboarding-brand-sep"></span>
         <span class="onboarding-brand-name">StormBatch</span>
       </div>
@@ -35,7 +38,7 @@ const FEATURES = [
       </ul>
       <div v-if="errorMessage" class="notice error onboarding-error" role="alert">{{ errorMessage }}</div>
       <button class="primary-button onboarding-cta" type="button" @click="emit('login')">
-        <img :src="livestormIcon" alt="" class="bar-btn-icon" />
+        <img :src="buttonIcon" alt="" class="bar-btn-icon" />
         Connect with Livestorm
       </button>
     </div>

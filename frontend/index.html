@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <title>StormBatch</title>
+    <script>
+      // Apply the saved (or system) theme before first paint, so the page never
+      // flashes the other one. src/theme.js keeps it in sync afterwards.
+      (function () {
+        var theme = null;
+        try {
+          theme = localStorage.getItem("stormbatch-theme");
+        } catch (e) {}
+        if (theme !== "light" && theme !== "dark") {
+          theme = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        }
+        document.documentElement.setAttribute("data-colors-primitive", "Livestorm");
+        document.documentElement.setAttribute("data-colors-semantic", theme);
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
