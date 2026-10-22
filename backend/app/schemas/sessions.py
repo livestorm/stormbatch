@@ -36,3 +36,6 @@ class RegisteredEmailsResponse(BaseModel):
     session_id: str
     # Lowercased, so callers can compare case-insensitively.
     emails: list[str]
+    # False when the session was too large to list; emails is then empty.
+    checked: bool = True
+    registrants_count: Optional[int] = None

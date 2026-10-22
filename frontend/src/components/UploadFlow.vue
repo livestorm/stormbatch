@@ -25,7 +25,7 @@ const errorMessage = ref("");
 const noticeMessage = ref("");
 const extraSessionIds = ref([]);
 const batch = useBatchJobs();
-const { registeredCheck, isRegistered } = useRegisteredEmails(props.session);
+const { checkRegistered, isRegistered, registeredCheckNote } = useRegisteredEmails(props.session);
 
 watch(() => batch.isBusy, (busy) => emit("busy-change", busy));
 
@@ -127,6 +127,7 @@ async function loadPreview() {
     });
     preview.value = data;
     columnSettings.value = initialColumnSettings(data);
+    checkRegistered();
   } catch (error) {
     errorMessage.value = error.message;
   } finally {
@@ -188,10 +189,7 @@ const registerNotes = computed(() => {
   if (alreadyRegisteredCount.value) {
     notes.push(`${peopleLabel(alreadyRegisteredCount.value)} already registered to this session will be skipped.`);
   }
-  if (registeredCheck.value === "checking") notes.push("Checking who's already registered to this session…");
-  if (registeredCheck.value === "failed") {
-    notes.push("We couldn't check who's already registered. Livestorm will refuse duplicates on its side.");
-  }
+  if (registeredCheckNote.value) notes.push(registeredCheckNote.value);
   return notes;
 });
 

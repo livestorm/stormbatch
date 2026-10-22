@@ -11,10 +11,11 @@ Run (from the backend/ directory):
 
 import time
 
+import httpx
 import pytest
 
 from app.services import sessions_service
-from app.services.livestorm_client import LivestormAPIError
+from app.services.livestorm_client import LivestormAPIError, LivestormClient, TooManyRecordsError
 from tests.conftest import needs_credentials
 
 NOW = int(time.time())
@@ -211,8 +212,8 @@ class FakeLivestormClient:
             raise FakeLivestormClient.raise_on_get
         return {"data": _session(session_id, "past", NOW - 86400), "included": [_event()]}
 
-    async def list_session_people(self, session_id):
-        FakeLivestormClient.calls.append(("list_session_people", session_id))
+    async def list_session_people(self, session_id, max_records=None):
+        FakeLivestormClient.calls.append(("list_session_people", session_id, max_records))
         if FakeLivestormClient.raise_on_get:
             raise FakeLivestormClient.raise_on_get
         return [
@@ -326,7 +327,72 @@ def test_registered_emails_are_lowercased_and_unique(client, session_cookie, fak
     response = client.get(f"/api/sessions/{SESSION_A}/emails", cookies={"session": session_cookie})
 
     assert response.status_code == 200
-    assert response.json() == {"session_id": SESSION_A, "emails": ["ann@example.com", "bob@example.com"]}
+    assert response.json() == {
+        "session_id": SESSION_A,
+        "emails": ["ann@example.com", "bob@example.com"],
+        "checked": True,
+        "registrants_count": 3,
+    }
+    [(_, _, max_records)] = fake_livestorm.calls
+    assert max_records == sessions_service.REGISTERED_CHECK_LIMIT
+
+
+def test_registered_emails_skips_sessions_too_large_to_list(client, session_cookie, fake_livestorm):
+    fake_livestorm.raise_on_get = TooManyRecordsError(12_345)
+
+    response = client.get(f"/api/sessions/{SESSION_A}/emails", cookies={"session": session_cookie})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "session_id": SESSION_A,
+        "emails": [],
+        "checked": False,
+        "registrants_count": 12_345,
+    }
+
+
+def _people_page(page, record_count, page_count):
+    return {
+        "data": [{"id": f"p{page}", "attributes": {}}],
+        "meta": {
+            "current_page": page,
+            "next_page": page + 1 if page + 1 < page_count else None,
+            "record_count": record_count,
+            "page_count": page_count,
+        },
+    }
+
+
+async def test_listing_a_large_session_costs_one_call(monkeypatch):
+    calls = []
+
+    async def fake_request(self, method, path, **kwargs):
+        calls.append(kwargs["params"]["page[number]"])
+        return httpx.Response(200, json=_people_page(0, record_count=2_500, page_count=25))
+
+    monkeypatch.setattr(LivestormClient, "_request", fake_request)
+    async with LivestormClient(token="token") as client:
+        with pytest.raises(TooManyRecordsError) as raised:
+            await client.list_session_people(SESSION_A, max_records=2_000)
+
+    assert raised.value.record_count == 2_500
+    assert calls == [0]
+
+
+async def test_listing_under_the_limit_reads_every_page(monkeypatch):
+    calls = []
+
+    async def fake_request(self, method, path, **kwargs):
+        page = kwargs["params"]["page[number]"]
+        calls.append(page)
+        return httpx.Response(200, json=_people_page(page, record_count=150, page_count=2))
+
+    monkeypatch.setattr(LivestormClient, "_request", fake_request)
+    async with LivestormClient(token="token") as client:
+        people = await client.list_session_people(SESSION_A, max_records=2_000, inter_page_delay=0)
+
+    assert calls == [0, 1]
+    assert [p["id"] for p in people] == ["p0", "p1"]
 
 
 def test_registered_emails_requires_auth_and_valid_id(client, session_cookie, fake_livestorm):

@@ -7,6 +7,9 @@ from typing import Any, Optional
 from app.services.transfer_service import _extract_person_fields
 
 SESSIONS_PAGE_SIZE = 10
+# Listing registrants costs one Livestorm call per 100 people, out of a
+# 10,000-call rolling monthly quota, so larger sessions are not checked ahead.
+REGISTERED_CHECK_LIMIT = 2_000
 UPCOMING_STATUSES = {"upcoming", "live"}
 # Sessions that never started keep the "upcoming" status forever, so lists only
 # keep sessions planned from a few hours ago onwards (this also keeps live ones).

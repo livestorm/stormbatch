@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.routes.helpers import livestorm_error_to_http, require_token
 from app.schemas.sessions import RegisteredEmailsResponse, SessionDetailResponse, SessionListResponse
-from app.services.livestorm_client import LivestormAPIError, LivestormClient
+from app.services.livestorm_client import LivestormAPIError, LivestormClient, TooManyRecordsError
 from app.services.sessions_service import (
+    REGISTERED_CHECK_LIMIT,
     build_event_search_params,
     build_session_list_params,
     is_session_id,
@@ -80,14 +81,26 @@ async def get_session(request: Request, session_id: str, token: str = Depends(re
 
 @router.get("/sessions/{session_id}/emails", response_model=RegisteredEmailsResponse)
 async def get_registered_emails(request: Request, session_id: str, token: str = Depends(require_token)) -> RegisteredEmailsResponse:
-    """Emails already registered to a session, to skip them before sending a batch."""
+    """Emails already registered to a session, to skip them before sending a batch.
+
+    Sessions over REGISTERED_CHECK_LIMIT registrants are not listed (one call
+    tells): the answer then says checked=false and Livestorm refuses duplicates.
+    """
     if not is_session_id(session_id):
         raise HTTPException(status_code=404, detail=SESSION_NOT_FOUND_DETAIL)
 
     try:
         async with LivestormClient(token=token, use_bearer=True) as client:
-            people = await client.list_session_people(session_id=session_id.strip())
-        return RegisteredEmailsResponse(session_id=session_id.strip(), emails=registrant_emails(people))
+            people = await client.list_session_people(
+                session_id=session_id.strip(), max_records=REGISTERED_CHECK_LIMIT
+            )
+        return RegisteredEmailsResponse(
+            session_id=session_id.strip(), emails=registrant_emails(people), registrants_count=len(people)
+        )
+    except TooManyRecordsError as exc:
+        return RegisteredEmailsResponse(
+            session_id=session_id.strip(), emails=[], checked=False, registrants_count=exc.record_count
+        )
     except LivestormAPIError as exc:
         if exc.status_code == 404:
             raise HTTPException(status_code=404, detail=SESSION_NOT_FOUND_DETAIL) from exc
